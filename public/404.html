@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Samsung Earnings</title>
+    <script>
+      // GitHub Pages SPA redirect: preserve the full path as a query param
+      var base = '/SamsungEarnings-investing-uganda-256/';
+      var path = window.location.pathname;
+      var query = window.location.search;
+      var hash = window.location.hash;
+
+      // Strip the base from the path
+      var relative = path.startsWith(base) ? path.slice(base.length) : path;
+
+      var redirect = base + '?p=' + encodeURIComponent(relative + query + hash);
+      window.location.replace(redirect);
+    </script>
+  </head>
+  <body></body>
+</html>
