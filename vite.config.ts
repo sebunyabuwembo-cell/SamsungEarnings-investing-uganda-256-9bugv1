@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 export default defineConfig({
-  base: '/SamsungEarnings-investing-uganda-256/',
+  base: '/The-Engle-investment-/',
   plugins: [react()],
   resolve: {
     alias: {
