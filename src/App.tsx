@@ -1,5 +1,8 @@
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from '@/components/ui/sonner';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
+import MigrationBanner from '@/components/features/MigrationBanner';
+
+// Pages
 import Index from '@/pages/Index';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
@@ -21,15 +24,17 @@ import AdminDashboard from '@/pages/AdminDashboard';
 import NotFound from '@/pages/NotFound';
 
 function App() {
-  const isAdminLoggedIn = () => { try { return localStorage.getItem('adminLoggedIn') === 'true'; } catch { return false; } };
   return (
-    <HashRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
+      <MigrationBanner />
+      <Toaster position="top-center" richColors />
       <Routes>
+        {/* Public routes */}
         <Route path="/" element={<Index />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/admin" element={<AdminLogin />} />
-        <Route path="/admin/dashboard" element={isAdminLoggedIn() ? <AdminDashboard /> : <Navigate to="/admin" replace />} />
+
+        {/* User routes */}
         <Route path="/home" element={<Home />} />
         <Route path="/product" element={<Product />} />
         <Route path="/recharge" element={<Recharge />} />
@@ -42,12 +47,17 @@ function App() {
         <Route path="/mine" element={<Mine />} />
         <Route path="/team" element={<Team />} />
         <Route path="/about" element={<AboutUs />} />
-        <Route path="/about-us" element={<AboutUs />} />
         <Route path="/regulation" element={<Regulation />} />
+
+        {/* Admin routes */}
+        <Route path="/admin" element={<AdminLogin />} />
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
+
+        {/* Fallback */}
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <Toaster />
-    </HashRouter>
+    </BrowserRouter>
   );
 }
+
 export default App;
