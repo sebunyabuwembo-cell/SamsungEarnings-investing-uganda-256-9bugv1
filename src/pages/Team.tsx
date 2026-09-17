@@ -143,7 +143,7 @@ const Team = () => {
   };
 
   const shareTelegram = () => {
-    const msg = `🚀 Join Samsung Earnings — Uganda's top investment platform!\n\n💰 Earn daily income from Samsung packages\n🎁 Get UGX 7,000 registration bonus\n👥 Earn 30% commission on referrals\n\nUse my referral code: *${user.referralCode}*\n\nRegister here: ${refLink}`;
+    const msg = `🚀 Join Engle Investment — Uganda's top investment platform!\n\n💰💰 Earn daily income from Engle packages \n🎁 Get UGX 7,000 registration bonus\n👥 Earn 30% commission on referrals\n\nUse my referral code: *${user.referralCode}*\n\nRegister here: ${refLink}`;
     window.open(`https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(msg)}`, '_blank');
   };
 
