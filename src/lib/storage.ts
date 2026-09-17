@@ -269,6 +269,35 @@ export async function updateRedeemCode(code: RedeemCode): Promise<void> {
 export async function deleteRedeemCodeById(id: string): Promise<void> {
   await supabase.from('samsung_redeem_codes').delete().eq('id', id);
 }
+export async function runDailyIncomeWithStats(): Promise<{ processed: number; totalPaid: number; errors: number }> {
+  const stats = { processed: 0, totalPaid: 0, errors: 0 };
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const allProducts = await getProducts();
+  const activeProducts = allProducts.filter((p) => p.status === 'active');
+  for (const product of activeProducts) {
+    try {
+      if (product.lastIncomeDate && product.lastIncomeDate.startsWith(todayStr)) continue;
+      if (product.expiryDate && new Date(product.expiryDate) < now) {
+        await updateProduct(product.id, { status: 'expired' }); continue;
+      }
+      const income = product.dailyIncome;
+      await updateProduct(product.id, { lastIncomeDate: now.toISOString(), totalIncomeEarned: product.totalIncomeEarned + income });
+      const fresh = await getUserById(product.userId);
+      if (fresh) {
+        await updateUser(product.userId, { balance: fresh.balance + income, totalEarnings: fresh.totalEarnings + income, dailyEarnings: (fresh.dailyEarnings ?? 0) + income });
+        await addNotification({ userId: product.userId, type: 'income', title: 'Daily Income Credited', message: `UGX ${income.toLocaleString()} from ${product.packageName} has been added to your balance.`, isRead: false });
+      }
+      stats.processed++;
+      stats.totalPaid += income;
+    } catch (e) {
+      console.error('runDailyIncomeWithStats error for product', product.id, e);
+      stats.errors++;
+    }
+  }
+  return stats;
+}
+
 export async function processDailyIncome(): Promise<void> {
   const user = getCurrentUser(); if (!user) return;
   const now = new Date(); const todayStr = now.toISOString().split('T')[0];
