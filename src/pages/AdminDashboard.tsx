@@ -359,7 +359,7 @@ const AdminDashboard = () => {
           <div className="w-9 h-9 bg-blue-400 rounded-full flex items-center justify-center text-lg">🌸</div>
           <div>
             <h1 className="font-bold text-lg leading-none">Admin Panel</h1>
-            <p className="text-blue-200 text-xs">Samsung Earnings Uganda</p>
+            <p className="text-blue-200 text-xs">Engle Investment Uganda</p>
           </div>
         </div>
         <button onClick={handleLogout} className="bg-blue-700 hover:bg-blue-600 px-4 py-1.5 rounded-lg text-sm font-medium transition">
