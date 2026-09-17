@@ -20,15 +20,15 @@ const Register = () => {
   }, [searchParams]);
 
   const generateReferralCode = (phone: string) => {
-    return 'SAM' + phone.slice(-4) + Math.random().toString(36).substring(2, 5).toUpperCase();
+    return 'EAGLE' + phone.slice(-4) + Math.random().toString(36).substring(2, 5).toUpperCase();
   };
 
   const handleRegister = async () => {
-    if (!name.trim() || !phone.trim() || !password.trim()) {
+    if (!name.trim() ||!phone.trim() ||!password.trim()) {
       toast.error('Please fill in all required fields');
       return;
     }
-    if (password !== confirmPassword) {
+    if (password!== confirmPassword) {
       toast.error('Passwords do not match');
       return;
     }
@@ -42,59 +42,65 @@ const Register = () => {
     }
 
     setLoading(true);
-
-    const existing = await getUserByPhone(phone.trim());
-    if (existing) {
-      toast.error('Phone number already registered');
-      setLoading(false);
-      return;
-    }
-
-    let referredById: string | null = null;
-    if (referralCode.trim()) {
-      const referrer = await getUserByReferralCode(referralCode.trim());
-      if (referrer) {
-        referredById = referrer.id;
-      } else {
-        toast.error('Invalid referral code');
+    try {
+      const cleanPhone = phone.trim();
+      const existing = await getUserByPhone(cleanPhone);
+      if (existing) {
+        toast.error('Phone number already registered');
         setLoading(false);
         return;
       }
+
+      let referredById: string | null = null;
+      if (referralCode.trim()) {
+        const referrer = await getUserByReferralCode(referralCode.trim());
+        if (referrer) {
+          referredById = referrer.id;
+        } else {
+          toast.error('Invalid referral code');
+          setLoading(false);
+          return;
+        }
+      }
+
+      const newUser: User = {
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        phone: cleanPhone,
+        password,
+        balance: 7000,
+        totalEarnings: 0,
+        dailyEarnings: 0,
+        referralEarnings: 0,
+        totalWithdrawal: 0,
+        referralCode: generateReferralCode(cleanPhone),
+        referredBy: referredById,
+        frozen: false,
+        claimedMissions: [],
+        lastCheckIn: null,
+        registrationBonus: 7000,
+        createdAt: new Date().toISOString(),
+      };
+
+      await createUser(newUser);
+
+      await addNotification({
+        userId: newUser.id,
+        type: 'welcome',
+        title: 'Welcome to Eagle Investment!',
+        message: `Hello ${newUser.name}! Your account has been created. You received UGX 7,000 as a registration bonus. Start investing to earn daily income!`,
+        isRead: false,
+      });
+
+      setCurrentUser(newUser);
+      toast.success('Account created successfully!');
+      navigate('/home');
+    } catch (err) {
+      console.error(err);
+      toast.error('Registration failed. Try again.');
+    } finally {
+      setLoading(false);
     }
-
-    const newUser: User = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      phone: phone.trim(),
-      password,
-      balance: 7000,
-      totalEarnings: 0,
-      dailyEarnings: 0,
-      referralEarnings: 0,
-      totalWithdrawal: 0,
-      referralCode: generateReferralCode(phone.trim()),
-      referredBy: referredById,
-      frozen: false,
-      claimedMissions: [],
-      lastCheckIn: null,
-      registrationBonus: 7000,
-      createdAt: new Date().toISOString(),
-    };
-
-    await createUser(newUser);
-
-    await addNotification({
-      userId: newUser.id,
-      type: 'welcome',
-      title: 'Welcome to Samsung Earnings!',
-      message: `Hello ${newUser.name}! Your account has been created. You received UGX 7,000 as a registration bonus. Start investing to earn daily income!`,
-      isRead: false,
-    });
-
-    setCurrentUser(newUser);
-    toast.success('Account created successfully!');
-    navigate('/home');
-    setLoading(false);
   };
 
   return (
@@ -103,9 +109,9 @@ const Register = () => {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-blue-800 font-bold text-2xl">SE</span>
+            <span className="text-blue-800 font-bold text-2xl">E</span>
           </div>
-          <h1 className="text-white text-2xl font-bold">Samsung Earnings</h1>
+          <h1 className="text-white text-2xl font-bold">Eagle Investment</h1>
           <p className="text-blue-200 text-sm mt-1">Create your account</p>
         </div>
 
@@ -182,7 +188,7 @@ const Register = () => {
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors mt-2"
             >
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading? 'Creating account...' : 'Create Account'}
             </button>
           </div>
 
