@@ -1,86 +1,231 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Copy } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentUser, createRecharge } from '@/lib/storage';
-import { generateId, formatUGX } from '@/lib/utils';
+import {
+  getCurrentUser, refreshCurrentUser, createRecharge, getUserRecharges,
+} from '@/lib/storage';
+import { Recharge } from '@/types';
 import { MTN_NUMBER, MTN_NAME, AIRTEL_NUMBER, AIRTEL_NAME, MIN_DEPOSIT } from '@/constants/packages';
-import { Recharge as RechargeType } from '@/types';
-import { BRAND } from '@/constants/brand';
 
-const Recharge = () => {
+const fmt = (n: number) => `UGX ${Number(n).toLocaleString()}`;
+
+const RechargePage = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [amount, setAmount] = useState('');
+  const [user, setUser] = useState(getCurrentUser());
+  const [recharges, setRecharges] = useState<Recharge[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
   const [network, setNetwork] = useState<'mtn' | 'airtel'>('mtn');
+  const [amount, setAmount] = useState('');
   const [senderPhone, setSenderPhone] = useState('');
   const [senderName, setSenderName] = useState('');
   const [proof, setProof] = useState('');
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => { const u = getCurrentUser(); if (!u) navigate('/login'); else setUser(u); }, [navigate]);
+  useEffect(() => {
+    if (!user) { navigate('/login'); return; }
+    loadData();
+  }, []);
 
-  const targetNumber = network === 'mtn'? MTN_NUMBER : AIRTEL_NUMBER;
-  const targetName = network === 'mtn'? MTN_NAME : AIRTEL_NAME;
-
-  const handleNext = () => {
-    if (!amount || parseInt(amount) < MIN_DEPOSIT) { toast.error(`Minimum deposit is ${formatUGX(MIN_DEPOSIT)}`); return; }
-    setStep(2);
+  const loadData = async () => {
+    const freshUser = await refreshCurrentUser();
+    if (!freshUser) { navigate('/login'); return; }
+    setUser(freshUser);
+    const r = await getUserRecharges(freshUser.id);
+    setRecharges(r);
+    setLoading(false);
   };
 
   const handleSubmit = async () => {
-    if (!senderPhone ||!senderName ||!proof.trim()) { toast.error('Fill all fields including proof'); return; }
+    if (!user) return;
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt < MIN_DEPOSIT) {
+      toast.error(`Minimum recharge is ${fmt(MIN_DEPOSIT)}`);
+      return;
+    }
+    if (!senderPhone.trim()) {
+      toast.error('Enter the sender phone number');
+      return;
+    }
+    if (!senderName.trim()) {
+      toast.error('Enter the sender name');
+      return;
+    }
+
     setSubmitting(true);
-    const recharge: RechargeType = { id: generateId(), userId: user.id, userName: user.name, userPhone: user.phone, amount: parseInt(amount), network, senderPhone, senderName, proof, status: 'pending', createdAt: new Date().toISOString(), processedAt: null };
+    const recharge: Recharge = {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      userName: user.name,
+      userPhone: user.phone,
+      amount: amt,
+      network,
+      senderPhone: senderPhone.trim(),
+      senderName: senderName.trim(),
+      proof: proof.trim(),
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      processedAt: null,
+    };
+
     await createRecharge(recharge);
-    toast.success(`${BRAND.short} recharge submitted! Waiting approval.`); setStep(3); setSubmitting(false);
+    toast.success('Recharge submitted! Awaiting admin approval.');
+    setAmount('');
+    setSenderPhone('');
+    setSenderName('');
+    setProof('');
+    setSubmitting(false);
+    await loadData();
   };
 
+  if (!user) return null;
+
+  const depositTarget = network === 'mtn'
+    ? { number: MTN_NUMBER, name: MTN_NAME, label: 'MTN Mobile Money' }
+    : { number: AIRTEL_NUMBER, name: AIRTEL_NAME, label: 'Airtel Money' };
+
   return (
-    <div className="app-container min-h-screen bg-gray-50">
-      <div className="flex items-center px-4 py-4 bg-white border-b">
-        <button onClick={() => navigate(-1)} className="mr-3"><ArrowLeft className="w-6 h-6" /></button>
-        <h1 className="font-bold text-lg">Recharge {BRAND.short}</h1>
+    <div className="min-h-screen bg-gray-50 pb-24">
+      {/* Header */}
+      <div className="bg-blue-900 text-white px-4 py-4 flex items-center gap-3 shadow">
+        <button onClick={() => navigate(-1)} className="p-1">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <h1 className="text-lg font-bold">Recharge Balance</h1>
       </div>
 
-      {step === 1 && (
-        <div className="px-4 py-5 space-y-4">
-          <div className="border rounded-2xl p-4" style={{background: `${BRAND.color}10`, borderColor: `${BRAND.color}20`}}>
-            <p className="text-sm font-bold" style={{color: BRAND.color}}>📌 Minimum Deposit: UGX 15,000</p>
-            <p className="text-xs mt-1 opacity-80" style={{color: BRAND.color}}>Funds credited to {BRAND.name} after admin approval.</p>
-          </div>
-          <div><label className="text-sm font-medium text-gray-600 mb-2 block">Amount (UGX)</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Min 15,000" className="w-full border rounded-xl px-4 py-3 outline-none bg-white" /></div>
-          <div><label className="text-sm font-medium text-gray-600 mb-2 block">Network</label><div className="grid grid-cols-2 gap-3">{(['mtn','airtel'] as const).map((n) => (<button key={n} onClick={() => setNetwork(n)} className={`py-3 rounded-xl border-2 font-semibold text-sm ${network===n? 'bg-emerald-50':''}`} style={{borderColor: network===n? BRAND.color:'#e5e7eb', color: network===n? BRAND.color:''}}>{n==='mtn'?'📲 MTN MoMo':'📱 Airtel Money'}</button>))}</div></div>
-          <button onClick={handleNext} className="w-full py-4 rounded-xl text-white font-bold" style={{background: BRAND.gradient}}>Continue</button>
+      <div className="p-4 space-y-4">
+        {/* Instructions */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="font-semibold text-blue-800 text-sm mb-2">📱 How to Recharge</div>
+          <ol className="text-blue-700 text-xs space-y-1 list-decimal list-inside">
+            <li>Select your network (MTN or Airtel)</li>
+            <li>Send money to the number shown below</li>
+            <li>Fill in the form and submit for admin approval</li>
+            <li>Your balance will be updated once approved</li>
+          </ol>
         </div>
-      )}
 
-      {step === 2 && (
-        <div className="px-4 py-5 space-y-4">
-          <div className="rounded-2xl p-5 text-white" style={{background: `linear-gradient(135deg, #052e16, ${BRAND.color})`}}>
-            <div className="text-white/70 text-sm mb-3">Send {formatUGX(parseInt(amount))} to {BRAND.short}:</div>
-            <div className="flex items-center justify-between mb-2"><div><div className="font-bold text-xl">{targetNumber}</div><div className="text-white/70 text-sm">{targetName}</div><div className="text-white/50 text-xs mt-1">{network==='mtn'?'MTN Mobile Money':'Airtel Money'}</div></div><button onClick={()=>{navigator.clipboard.writeText(targetNumber); toast.success('Number copied!');}} className="bg-white/20 rounded-xl px-3 py-2 flex items-center gap-1"><Copy className="w-4 h-4 text-white" /><span className="text-white text-xs">Copy</span></button></div>
-            <div className="bg-white/10 rounded-xl p-3 mt-3"><p className="text-white/80 text-xs leading-relaxed">1. Send money to number above<br/>2. Copy M-Money SMS<br/>3. Paste below as proof<br/>4. Submit for {BRAND.short} approval</p></div>
+        {/* Network Selection */}
+        <div className="bg-white rounded-xl shadow p-4">
+          <h2 className="font-semibold text-gray-800 mb-3">Select Network</h2>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setNetwork('mtn')}
+              className={`flex-1 py-3 rounded-xl text-sm font-semibold transition border-2 ${
+                network === 'mtn' ? 'border-yellow-400 bg-yellow-50 text-yellow-800' : 'border-gray-200 bg-gray-50 text-gray-600'
+              }`}
+            >
+              <div className="text-lg mb-0.5">📲</div>
+              MTN Mobile Money
+            </button>
+            <button
+              onClick={() => setNetwork('airtel')}
+              className={`flex-1 py-3 rounded-xl text-sm font-semibold transition border-2 ${
+                network === 'airtel' ? 'border-red-400 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600'
+              }`}
+            >
+              <div className="text-lg mb-0.5">📲</div>
+              Airtel Money
+            </button>
           </div>
-          <div><label className="text-sm font-medium text-gray-600 mb-2 block">Your Phone</label><input type="tel" value={senderPhone} onChange={(e)=>setSenderPhone(e.target.value)} placeholder="07XXXXXXXX" className="w-full border rounded-xl px-4 py-3 bg-white outline-none" /></div>
-          <div><label className="text-sm font-medium text-gray-600 mb-2 block">Your Name</label><input type="text" value={senderName} onChange={(e)=>setSenderName(e.target.value)} placeholder="Name on account" className="w-full border rounded-xl px-4 py-3 bg-white outline-none" /></div>
-          <div><label className="text-sm font-medium text-gray-600 mb-2 block">Payment Proof (SMS)</label><textarea value={proof} onChange={(e)=>setProof(e.target.value)} placeholder="Paste M-Money confirmation here..." className="w-full border rounded-xl px-4 py-3 text-sm bg-white h-24 resize-none outline-none" /></div>
-          <div className="flex gap-3"><button onClick={()=>setStep(1)} className="flex-1 py-4 rounded-xl border text-gray-600 font-semibold">Back</button><button onClick={handleSubmit} disabled={submitting} className="flex-1 py-4 rounded-xl text-white font-bold disabled:opacity-60" style={{background: BRAND.gradient}}>{submitting? 'Submitting...' : 'Submit to '+BRAND.short}</button></div>
         </div>
-      )}
 
-      {step === 3 && (
-        <div className="px-4 py-8 flex flex-col items-center">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4" style={{background: `${BRAND.color}20`}}><span className="text-4xl">⏳</span></div>
-          <h2 className="font-bold text-xl mb-2">Recharge Submitted!</h2>
-          <p className="text-gray-500 text-sm text-center mb-6">Your recharge of <span className="font-bold" style={{color: BRAND.color}}>{formatUGX(parseInt(amount))}</span> to {BRAND.name} is pending admin approval.</p>
-          <div className="w-full bg-white rounded-2xl p-5 shadow-sm mb-4 space-y-3"><div className="flex justify-between text-sm"><span className="text-gray-400">Amount</span><span className="font-bold">{formatUGX(parseInt(amount))}</span></div><div className="flex justify-between text-sm"><span className="text-gray-400">Network</span><span className="font-medium">{network==='mtn'?'📲 MTN':'📱 Airtel'}</span></div><div className="flex justify-between text-sm"><span className="text-gray-400">From</span><span className="font-medium">{senderPhone}</span></div><div className="flex justify-between text-sm"><span className="text-gray-400">Status</span><span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded-full">⏳ Pending</span></div></div>
-          <div className="w-full space-y-2"><button onClick={()=>navigate('/records')} className="w-full py-4 rounded-xl text-white font-bold" style={{background: BRAND.gradient}}>Check Status</button><button onClick={()=>navigate('/home')} className="w-full py-3 rounded-xl border text-gray-600 font-semibold text-sm">Back to Home</button></div>
+        {/* Deposit Target */}
+        <div className={`rounded-xl p-4 shadow ${network === 'mtn' ? 'bg-yellow-400' : 'bg-red-500'}`}>
+          <div className="text-white text-xs font-medium mb-1">Send payment to:</div>
+          <div className="text-white font-bold text-2xl tracking-wider">{depositTarget.number}</div>
+          <div className="text-white/90 text-sm">{depositTarget.name}</div>
+          <div className="text-white/70 text-xs mt-1">{depositTarget.label}</div>
         </div>
-      )}
+
+        {/* Form */}
+        <div className="bg-white rounded-xl shadow p-4 space-y-3">
+          <h2 className="font-semibold text-gray-800">Recharge Details</h2>
+
+          <div>
+            <label className="text-xs text-gray-500 font-medium mb-1 block">Amount (UGX)</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">UGX</span>
+              <input
+                type="number"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder={`Min ${fmt(MIN_DEPOSIT)}`}
+                className="w-full border rounded-lg pl-14 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 font-medium mb-1 block">Sender Phone Number</label>
+            <input
+              type="tel"
+              value={senderPhone}
+              onChange={e => setSenderPhone(e.target.value)}
+              placeholder="Phone number used to send"
+              className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 font-medium mb-1 block">Sender Name</label>
+            <input
+              type="text"
+              value={senderName}
+              onChange={e => setSenderName(e.target.value)}
+              placeholder="Name on the mobile money account"
+              className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 font-medium mb-1 block">Transaction Reference (optional)</label>
+            <input
+              type="text"
+              value={proof}
+              onChange={e => setProof(e.target.value)}
+              placeholder="Transaction ID or proof"
+              className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition"
+          >
+            {submitting ? 'Submitting...' : 'Submit Recharge'}
+          </button>
+        </div>
+
+        {/* History */}
+        {!loading && recharges.length > 0 && (
+          <div className="bg-white rounded-xl shadow p-4">
+            <h2 className="font-semibold text-gray-800 mb-3">Recharge History</h2>
+            <div className="space-y-3">
+              {recharges.slice(0, 10).map(r => (
+                <div key={r.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">{fmt(r.amount)}</div>
+                    <div className="text-xs text-gray-500 uppercase">{r.network} · {r.senderPhone}</div>
+                    <div className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleDateString()}</div>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                    r.status === 'approved' ? 'bg-green-100 text-green-700'
+                    : r.status === 'pending' ? 'bg-yellow-100 text-yellow-700'
+                    : 'bg-red-100 text-red-700'
+                  }`}>{r.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
-export default Recharge;
+
+export default RechargePage;
