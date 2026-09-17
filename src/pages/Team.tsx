@@ -138,7 +138,7 @@ const Team = () => {
   const copyLink = () => { navigator.clipboard.writeText(refLink); toast.success('Referral link copied!'); };
 
   const shareWhatsApp = () => {
-    const msg = `Join Samsung Earnings and earn daily! Use my referral code: ${user.referralCode}\n\nRegister here: ${refLink}\n\n🎁 Get UGX 7,000 registration bonus!`;
+    const msg = `Join Engle Investment and earn daily! Use my referral code: ${user.referralCode}\n\nRegister here: ${refLink}\n\n🎁 Get UGX 7,000 registration bonus!`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
