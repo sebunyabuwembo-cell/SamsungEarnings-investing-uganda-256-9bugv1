@@ -1,64 +1,140 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentUser, getUserWallets, saveWallet } from '@/lib/storage';
-import { generateId } from '@/lib/utils';
-import { Wallet as WalletType } from '@/types';
-import { supabase } from '@/lib/supabase';
-import { BRAND } from '@/constants/brand';
+import { getCurrentUser, refreshCurrentUser, getUserWallets, saveWallet, deleteWalletsByUser } from '@/lib/storage';
+import { Wallet } from '@/types';
 
 const WalletPage = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [wallets, setWallets] = useState<WalletType[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
+  const [user, setUser] = useState(getCurrentUser());
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [walletType, setWalletType] = useState<'mtn' | 'airtel'>('mtn');
   const [walletPhone, setWalletPhone] = useState('');
   const [walletName, setWalletName] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const u = getCurrentUser();
-    if (!u) { navigate('/login'); return; }
-    setUser(u);
-    getUserWallets(u.id).then(setWallets);
-  }, [navigate]);
+    if (!user) { navigate('/login'); return; }
+    loadData();
+  }, []);
 
-  const handleAdd = async () => {
-    if (!walletPhone ||!walletName) { toast.error('Please fill all fields'); return; }
-    if (walletPhone.length < 10) { toast.error('Enter valid number'); return; }
-    const newWallet: WalletType = { id: generateId(), userId: user.id, type: walletType, phone: walletPhone, name: walletName, createdAt: new Date().toISOString() };
-    await saveWallet(newWallet);
-    setWallets((prev) => [...prev, newWallet]);
-    setWalletPhone(''); setWalletName(''); setShowAdd(false);
-    toast.success(`${BRAND.short} wallet added!`);
+  const loadData = async () => {
+    const freshUser = await refreshCurrentUser();
+    if (!freshUser) { navigate('/login'); return; }
+    setUser(freshUser);
+    const w = await getUserWallets(freshUser.id);
+    setWallets(w);
+    setLoading(false);
   };
 
-  const handleDelete = async (id: string) => {
-    await supabase.from('samsung_wallets').delete().eq('id', id);
-    setWallets((prev) => prev.filter((w) => w.id!== id));
-    toast.success('Wallet removed');
+  const handleAddWallet = async () => {
+    if (!walletPhone.trim() || !walletName.trim()) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+    setSaving(true);
+    const wallet: Wallet = {
+      id: crypto.randomUUID(),
+      userId: user!.id,
+      type: walletType,
+      phone: walletPhone.trim(),
+      name: walletName.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    await saveWallet(wallet);
+    toast.success('Wallet saved successfully');
+    setWalletPhone('');
+    setWalletName('');
+    setSaving(false);
+    await loadData();
   };
+
+  if (!user) return null;
 
   return (
-    <div className="app-container min-h-screen bg-[#f8faf8]">
-      <div className="flex items-center justify-between px-4 py-4 bg-white border-b sticky top-0 z-10">
-        <div className="flex items-center"><button onClick={() => navigate(-1)} className="mr-3"><ArrowLeft className="w-6 h-6" /></button><h1 className="font-bold text-lg">{BRAND.short} Wallets</h1></div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1 text-white px-4 py-2 rounded-xl text-sm font-bold" style={{background: BRAND.color}}><Plus className="w-4 h-4" /> Add</button>
+    <div className="min-h-screen bg-gray-50 pb-20">
+      {/* Header */}
+      <div className="bg-blue-900 text-white px-4 py-4 flex items-center gap-3 shadow">
+        <button onClick={() => navigate(-1)} className="p-1">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <h1 className="text-lg font-bold">My Wallets</h1>
       </div>
-      <div className="px-4 py-5">
-        <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5 flex items-center gap-2 mb-4"><ShieldCheck className="w-4 h-4 text-emerald-600" /><span className="text-emerald-700 text-xs font-medium">{BRAND.name} withdrawals only to verified wallets</span></div>
-        {wallets.length === 0? (
-          <div className="text-center py-16"><div className="w-20 h-20 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center text-3xl">💳</div><div className="font-bold">No wallets yet</div><div className="text-gray-400 text-sm mt-1">Add MTN or Airtel to withdraw {BRAND.short} profits</div><button onClick={() => setShowAdd(true)} className="mt-5 text-white px-8 py-3 rounded-xl text-sm font-bold" style={{background: BRAND.color}}>Add Wallet</button></div>
-        ) : (
-          <div className="space-y-3">{wallets.map((w) => (<div key={w.id} className="bg-white rounded-2xl p-4 flex items-center border"><div className={`w-12 h-12 rounded-xl flex items-center justify-center mr-3 font-bold text-white ${w.type==='mtn'?'bg-yellow-500':'bg-red-500'}`}>{w.type==='mtn'?'M':'A'}</div><div className="flex-1"><div className="font-bold text-sm">{w.name}</div><div className="text-gray-600 text-xs">{w.phone}</div><div className="text-xs" style={{color: BRAND.color}}>{w.type==='mtn'?'MTN MoMo':'Airtel Money'}</div></div><button onClick={() => handleDelete(w.id)} className="text-red-400 p-2"><Trash2 className="w-5 h-5" /></button></div>))}</div>
-        )}
+
+      <div className="p-4 space-y-4">
+        {/* Add Wallet */}
+        <div className="bg-white rounded-xl shadow p-4">
+          <h2 className="font-semibold text-gray-800 mb-3">Add Payment Wallet</h2>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setWalletType('mtn')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${walletType === 'mtn' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                MTN Mobile Money
+              </button>
+              <button
+                onClick={() => setWalletType('airtel')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${walletType === 'airtel' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                Airtel Money
+              </button>
+            </div>
+            <input
+              type="tel"
+              value={walletPhone}
+              onChange={e => setWalletPhone(e.target.value)}
+              placeholder="Phone number"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <input
+              type="text"
+              value={walletName}
+              onChange={e => setWalletName(e.target.value)}
+              placeholder="Account holder name"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={handleAddWallet}
+              disabled={saving}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white py-2.5 rounded-lg text-sm font-semibold transition"
+            >
+              {saving ? 'Saving...' : 'Save Wallet'}
+            </button>
+          </div>
+        </div>
+
+        {/* Wallet List */}
+        <div className="bg-white rounded-xl shadow p-4">
+          <h2 className="font-semibold text-gray-800 mb-3">Saved Wallets</h2>
+          {loading ? (
+            <div className="text-center text-gray-400 py-6 text-sm">Loading...</div>
+          ) : wallets.length === 0 ? (
+            <div className="text-center text-gray-400 py-6 text-sm">No wallets added yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {wallets.map(w => (
+                <div key={w.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white text-xs ${w.type === 'mtn' ? 'bg-yellow-500' : 'bg-red-500'}`}>
+                    {w.type === 'mtn' ? 'MTN' : 'AIR'}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-800 text-sm">{w.name}</div>
+                    <div className="text-gray-500 text-xs">{w.phone}</div>
+                    <div className="text-gray-400 text-xs capitalize">{w.type === 'mtn' ? 'MTN Mobile Money' : 'Airtel Money'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      {showAdd && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={()=>setShowAdd(false)}><div className="w-full max-w-[430px] mx-auto bg-white rounded-t-3xl px-5 py-6" onClick={e=>e.stopPropagation()}><div className="flex justify-between mb-5"><h3 className="font-bold">Add {BRAND.short} Wallet</h3><button onClick={() => setShowAdd(false)} className="w-8 h-8 bg-gray-100 rounded-full">✕</button></div><div className="space-y-4"><div className="grid grid-cols-2 gap-3">{(['mtn','airtel'] as const).map((n)=>(<button key={n} onClick={()=>setWalletType(n)} className={`py-3.5 rounded-xl border-2 font-bold text-sm ${walletType===n?'bg-emerald-50':''}`} style={{borderColor: walletType===n? BRAND.color:'#e5e7eb', color: walletType===n? BRAND.color:''}}>{n==='mtn'?'MTN MoMo':'Airtel Money'}</button>))}</div><input type="text" value={walletName} onChange={(e)=>setWalletName(e.target.value)} placeholder="Account name" className="w-full border rounded-xl px-4 py-3.5 text-sm" /><input type="tel" value={walletPhone} onChange={(e)=>setWalletPhone(e.target.value)} placeholder="07XXXXXXXX" className="w-full border rounded-xl px-4 py-3.5 text-sm" /><button onClick={handleAdd} className="w-full py-4 rounded-xl text-white font-bold text-sm" style={{background: BRAND.gradient}}>Add to {BRAND.short}</button></div></div></div>
-      )}
     </div>
   );
 };
+
 export default WalletPage;
