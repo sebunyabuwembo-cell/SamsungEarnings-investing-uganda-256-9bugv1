@@ -97,12 +97,15 @@ export interface RedeemCode {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'package_approved' | 'package_rejected' | 'withdrawal_approved' | 'withdrawal_rejected' | 'daily_income' | 'referral_bonus';
+  type: string;
   title: string;
   message: string;
   isRead: boolean;
   createdAt: string;
 }
+
+/** Alias – same shape as UserProduct, used in AdminDashboard */
+export type Product = UserProduct;
 
 export interface AdminUser {
   id: string;

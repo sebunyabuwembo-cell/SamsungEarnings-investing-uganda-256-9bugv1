@@ -1,24 +1,23 @@
 /**
- * storage.ts
- * Centralized async data layer — all operations use Supabase
- * Tables: engle_users, engle_products, engle_notifications,
- *         engle_recharges, engle_redeem_codes, engle_wallets, engle_withdrawals
+ * storage.ts — centralized cloud data layer using Supabase (OnSpace Cloud)
+ * All tables: samsung_users, samsung_products, samsung_notifications,
+ *             samsung_recharges, samsung_redeem_codes, samsung_wallets, samsung_withdrawals
  */
 
 import { supabase } from '@/lib/supabase';
 import {
   User, UserProduct, Notification, Recharge, Wallet,
-  Withdrawal, RedeemCode,
+  RedeemCode, Withdrawal,
 } from '@/types';
 
-export type Product = UserProduct;
+// ─── SESSION HELPERS ────────────────────────────────────────────────────────
 
-const SESSION_KEY = 'current_user';
-const ADMIN_KEY = 'admin_session';
+const SESSION_KEY = 'samsung_current_user';
+const ADMIN_SESSION_KEY = 'samsung_admin_session';
 
 export function getCurrentUser(): User | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -27,31 +26,33 @@ export function getCurrentUser(): User | null {
 
 export function setCurrentUser(user: User | null): void {
   if (user) {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
   } else {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
   }
 }
 
 export async function refreshCurrentUser(): Promise<User | null> {
   const cached = getCurrentUser();
   if (!cached) return null;
-  const user = await getUserById(cached.id);
-  if (user) setCurrentUser(user);
-  return user;
+  const fresh = await getUserById(cached.id);
+  if (fresh) setCurrentUser(fresh);
+  return fresh;
 }
 
 export function getAdminSession(): boolean {
-  return sessionStorage.getItem(ADMIN_KEY) === 'true';
+  return localStorage.getItem(ADMIN_SESSION_KEY) === 'true';
 }
 
 export function setAdminSession(value: boolean): void {
   if (value) {
-    sessionStorage.setItem(ADMIN_KEY, 'true');
+    localStorage.setItem(ADMIN_SESSION_KEY, 'true');
   } else {
-    sessionStorage.removeItem(ADMIN_KEY);
+    localStorage.removeItem(ADMIN_SESSION_KEY);
   }
 }
+
+// ─── MAPPERS: DB row → TypeScript ────────────────────────────────────────────
 
 function mapUser(row: any): User {
   return {
@@ -83,9 +84,9 @@ function mapProduct(row: any): UserProduct {
     packagePrice: Number(row.package_price ?? 0),
     dailyIncome: Number(row.daily_income ?? 0),
     duration: Number(row.duration ?? 0),
+    status: row.status,
     buyDate: row.buy_date ?? null,
     expiryDate: row.expiry_date ?? null,
-    status: row.status,
     lastIncomeDate: row.last_income_date ?? null,
     totalIncomeEarned: Number(row.total_income_earned ?? 0),
     paymentProof: row.payment_proof ?? '',
@@ -161,119 +162,100 @@ function mapRedeemCode(row: any): RedeemCode {
   };
 }
 
+// ─── USERS ───────────────────────────────────────────────────────────────────
+
 export async function getUsers(): Promise<User[]> {
-  const { data, error } = await supabase.from('engle_users').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('getUsers:', error); return []; }
+  const { data } = await supabase.from('samsung_users').select('*').order('created_at', { ascending: false });
   return (data ?? []).map(mapUser);
 }
 
 export async function getUserById(id: string): Promise<User | null> {
-  const { data, error } = await supabase.from('engle_users').select('*').eq('id', id).single();
-  if (error || !data) return null;
-  return mapUser(data);
+  const { data } = await supabase.from('samsung_users').select('*').eq('id', id).single();
+  return data ? mapUser(data) : null;
 }
 
 export async function getUserByPhone(phone: string): Promise<User | null> {
-  const { data, error } = await supabase.from('engle_users').select('*').eq('phone', phone).single();
-  if (error || !data) return null;
-  return mapUser(data);
+  const { data } = await supabase.from('samsung_users').select('*').eq('phone', phone).maybeSingle();
+  return data ? mapUser(data) : null;
 }
 
 export async function getUserByReferralCode(code: string): Promise<User | null> {
-  const { data, error } = await supabase.from('engle_users').select('*').eq('referral_code', code).single();
-  if (error || !data) return null;
-  return mapUser(data);
+  const { data } = await supabase.from('samsung_users').select('*').eq('referral_code', code).maybeSingle();
+  return data ? mapUser(data) : null;
 }
 
 export async function createUser(user: User): Promise<void> {
-  const { error } = await supabase.from('engle_users').insert({
+  await supabase.from('samsung_users').insert({
     id: user.id,
     phone: user.phone,
     password: user.password,
     name: user.name,
     referral_code: user.referralCode,
-    referred_by: user.referredBy,
+    referred_by: user.referredBy ?? null,
     balance: user.balance,
     total_earnings: user.totalEarnings,
     total_withdrawal: user.totalWithdrawal,
     referral_earnings: user.referralEarnings,
     daily_earnings: user.dailyEarnings,
-    registration_bonus: user.registrationBonus,
-    last_check_in: user.lastCheckIn,
+    registration_bonus: user.registrationBonus ?? 7000,
+    last_check_in: user.lastCheckIn ?? null,
     frozen: user.frozen ?? false,
     claimed_missions: user.claimedMissions ?? [],
   });
-  if (error) console.error('createUser:', error);
 }
 
-export async function updateUser(
-  userOrId: User | string,
-  patch?: Partial<{
-    balance: number;
-    totalEarnings: number;
-    totalWithdrawal: number;
-    referralEarnings: number;
-    dailyEarnings: number;
-    lastCheckIn: string | null;
-    frozen: boolean;
-    claimedMissions: string[];
-    password: string;
-    name: string;
-  }>
-): Promise<void> {
+// Accepts either (fullUser: User) or (userId: string, partial: Partial<User>)
+export async function updateUser(userOrId: User | string, partial?: Partial<User>): Promise<void> {
+  let id: string;
+  let fields: Partial<User>;
+
   if (typeof userOrId === 'string') {
-    const id = userOrId;
-    const updates: Record<string, unknown> = {};
-    if (patch?.balance !== undefined) updates.balance = patch.balance;
-    if (patch?.totalEarnings !== undefined) updates.total_earnings = patch.totalEarnings;
-    if (patch?.totalWithdrawal !== undefined) updates.total_withdrawal = patch.totalWithdrawal;
-    if (patch?.referralEarnings !== undefined) updates.referral_earnings = patch.referralEarnings;
-    if (patch?.dailyEarnings !== undefined) updates.daily_earnings = patch.dailyEarnings;
-    if (patch?.lastCheckIn !== undefined) updates.last_check_in = patch.lastCheckIn;
-    if (patch?.frozen !== undefined) updates.frozen = patch.frozen;
-    if (patch?.claimedMissions !== undefined) updates.claimed_missions = patch.claimedMissions;
-    if (patch?.password !== undefined) updates.password = patch.password;
-    if (patch?.name !== undefined) updates.name = patch.name;
-    const { error } = await supabase.from('engle_users').update(updates).eq('id', id);
-    if (error) console.error('updateUser (partial):', error);
+    id = userOrId;
+    fields = partial ?? {};
   } else {
-    const user = userOrId;
-    const { error } = await supabase.from('engle_users').update({
-      phone: user.phone,
-      password: user.password,
-      name: user.name,
-      balance: user.balance,
-      total_earnings: user.totalEarnings,
-      total_withdrawal: user.totalWithdrawal,
-      referral_earnings: user.referralEarnings,
-      daily_earnings: user.dailyEarnings,
-      last_check_in: user.lastCheckIn,
-      frozen: user.frozen ?? false,
-      claimed_missions: user.claimedMissions ?? [],
-    }).eq('id', user.id);
-    if (error) console.error('updateUser (full):', error);
+    id = userOrId.id;
+    fields = userOrId;
+  }
+
+  const dbFields: Record<string, any> = {};
+  if (fields.phone !== undefined) dbFields.phone = fields.phone;
+  if (fields.password !== undefined) dbFields.password = fields.password;
+  if (fields.name !== undefined) dbFields.name = fields.name;
+  if (fields.referralCode !== undefined) dbFields.referral_code = fields.referralCode;
+  if (fields.referredBy !== undefined) dbFields.referred_by = fields.referredBy;
+  if (fields.balance !== undefined) dbFields.balance = fields.balance;
+  if (fields.totalEarnings !== undefined) dbFields.total_earnings = fields.totalEarnings;
+  if (fields.totalWithdrawal !== undefined) dbFields.total_withdrawal = fields.totalWithdrawal;
+  if (fields.referralEarnings !== undefined) dbFields.referral_earnings = fields.referralEarnings;
+  if (fields.dailyEarnings !== undefined) dbFields.daily_earnings = fields.dailyEarnings;
+  if (fields.registrationBonus !== undefined) dbFields.registration_bonus = fields.registrationBonus;
+  if (fields.lastCheckIn !== undefined) dbFields.last_check_in = fields.lastCheckIn;
+  if (fields.frozen !== undefined) dbFields.frozen = fields.frozen;
+  if (fields.claimedMissions !== undefined) dbFields.claimed_missions = fields.claimedMissions;
+
+  if (Object.keys(dbFields).length > 0) {
+    await supabase.from('samsung_users').update(dbFields).eq('id', id);
   }
 }
 
 export async function deleteUserById(id: string): Promise<void> {
-  const { error } = await supabase.from('engle_users').delete().eq('id', id);
-  if (error) console.error('deleteUserById:', error);
+  await supabase.from('samsung_users').delete().eq('id', id);
 }
 
+// ─── PRODUCTS ────────────────────────────────────────────────────────────────
+
 export async function getProducts(): Promise<UserProduct[]> {
-  const { data, error } = await supabase.from('engle_products').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('getProducts:', error); return []; }
+  const { data } = await supabase.from('samsung_products').select('*').order('created_at', { ascending: false });
   return (data ?? []).map(mapProduct);
 }
 
 export async function getUserProducts(userId: string): Promise<UserProduct[]> {
-  const { data, error } = await supabase.from('engle_products').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-  if (error) { console.error('getUserProducts:', error); return []; }
+  const { data } = await supabase.from('samsung_products').select('*').eq('user_id', userId).order('created_at', { ascending: false });
   return (data ?? []).map(mapProduct);
 }
 
 export async function createProduct(product: UserProduct): Promise<void> {
-  const { error } = await supabase.from('engle_products').insert({
+  await supabase.from('samsung_products').insert({
     id: product.id,
     user_id: product.userId,
     package_id: product.packageId,
@@ -282,278 +264,279 @@ export async function createProduct(product: UserProduct): Promise<void> {
     daily_income: product.dailyIncome,
     duration: product.duration,
     status: product.status,
-    buy_date: product.buyDate,
-    expiry_date: product.expiryDate,
-    last_income_date: product.lastIncomeDate,
-    total_income_earned: product.totalIncomeEarned,
+    buy_date: product.buyDate ?? null,
+    expiry_date: product.expiryDate ?? null,
+    last_income_date: product.lastIncomeDate ?? null,
+    total_income_earned: product.totalIncomeEarned ?? 0,
     payment_proof: product.paymentProof ?? '',
   });
-  if (error) console.error('createProduct:', error);
 }
 
-export async function updateProduct(
-  id: string,
-  patch: Partial<{
-    status: string;
-    buyDate: string | null;
-    expiryDate: string | null;
-    lastIncomeDate: string | null;
-    totalIncomeEarned: number;
-  }>
-): Promise<void> {
-  const updates: Record<string, unknown> = {};
-  if (patch.status !== undefined) updates.status = patch.status;
-  if (patch.buyDate !== undefined) updates.buy_date = patch.buyDate;
-  if (patch.expiryDate !== undefined) updates.expiry_date = patch.expiryDate;
-  if (patch.lastIncomeDate !== undefined) updates.last_income_date = patch.lastIncomeDate;
-  if (patch.totalIncomeEarned !== undefined) updates.total_income_earned = patch.totalIncomeEarned;
-  const { error } = await supabase.from('engle_products').update(updates).eq('id', id);
-  if (error) console.error('updateProduct:', error);
+export async function updateProduct(id: string, partial: Partial<UserProduct>): Promise<void> {
+  const dbFields: Record<string, any> = {};
+  if (partial.status !== undefined) dbFields.status = partial.status;
+  if (partial.buyDate !== undefined) dbFields.buy_date = partial.buyDate;
+  if (partial.expiryDate !== undefined) dbFields.expiry_date = partial.expiryDate;
+  if (partial.lastIncomeDate !== undefined) dbFields.last_income_date = partial.lastIncomeDate;
+  if (partial.totalIncomeEarned !== undefined) dbFields.total_income_earned = partial.totalIncomeEarned;
+  if (partial.dailyIncome !== undefined) dbFields.daily_income = partial.dailyIncome;
+  if (partial.packagePrice !== undefined) dbFields.package_price = partial.packagePrice;
+  if (partial.packageName !== undefined) dbFields.package_name = partial.packageName;
+
+  if (Object.keys(dbFields).length > 0) {
+    await supabase.from('samsung_products').update(dbFields).eq('id', id);
+  }
 }
 
 export async function deleteProduct(id: string): Promise<void> {
-  const { error } = await supabase.from('engle_products').delete().eq('id', id);
-  if (error) console.error('deleteProduct:', error);
+  await supabase.from('samsung_products').delete().eq('id', id);
 }
 
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
 export async function getNotifications(): Promise<Notification[]> {
-  const { data, error } = await supabase.from('engle_notifications').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('getNotifications:', error); return []; }
+  const { data } = await supabase.from('samsung_notifications').select('*').order('created_at', { ascending: false });
   return (data ?? []).map(mapNotification);
 }
 
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
-  const { data, error } = await supabase.from('engle_notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-  if (error) { console.error('getUserNotifications:', error); return []; }
+  const { data } = await supabase.from('samsung_notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false });
   return (data ?? []).map(mapNotification);
 }
 
-export async function addNotification(
-  notif: Omit<Notification, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
-): Promise<void> {
-  const { error } = await supabase.from('engle_notifications').insert({
-    id: notif.id ?? crypto.randomUUID(),
+export async function addNotification(notif: Omit<Notification, 'id' | 'createdAt'>): Promise<void> {
+  await supabase.from('samsung_notifications').insert({
+    id: crypto.randomUUID(),
     user_id: notif.userId,
     type: notif.type,
     title: notif.title,
     message: notif.message,
     is_read: notif.isRead ?? false,
-    created_at: notif.createdAt ?? new Date().toISOString(),
   });
-  if (error) console.error('addNotification:', error);
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
-  const { error } = await supabase.from('engle_notifications').update({ is_read: true }).eq('id', id);
-  if (error) console.error('markNotificationRead:', error);
+  await supabase.from('samsung_notifications').update({ is_read: true }).eq('id', id);
 }
 
+// ─── RECHARGES ───────────────────────────────────────────────────────────────
+
 export async function getRecharges(): Promise<Recharge[]> {
-  const { data, error } = await supabase.from('engle_recharges').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('getRecharges:', error); return []; }
+  const { data } = await supabase.from('samsung_recharges').select('*').order('created_at', { ascending: false });
   return (data ?? []).map(mapRecharge);
 }
 
 export async function getUserRecharges(userId: string): Promise<Recharge[]> {
-  const { data, error } = await supabase.from('engle_recharges').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-  if (error) { console.error('getUserRecharges:', error); return []; }
+  const { data } = await supabase.from('samsung_recharges').select('*').eq('user_id', userId).order('created_at', { ascending: false });
   return (data ?? []).map(mapRecharge);
 }
 
 export async function createRecharge(recharge: Recharge): Promise<void> {
-  const { error } = await supabase.from('engle_recharges').insert({
+  await supabase.from('samsung_recharges').insert({
     id: recharge.id,
     user_id: recharge.userId,
-    user_name: recharge.userName,
-    user_phone: recharge.userPhone,
+    user_name: recharge.userName ?? '',
+    user_phone: recharge.userPhone ?? '',
     amount: recharge.amount,
     network: recharge.network,
-    sender_phone: recharge.senderPhone,
-    sender_name: recharge.senderName,
-    proof: recharge.proof,
+    sender_phone: recharge.senderPhone ?? '',
+    sender_name: recharge.senderName ?? '',
+    proof: recharge.proof ?? '',
     status: recharge.status,
-    created_at: recharge.createdAt,
-    processed_at: recharge.processedAt,
   });
-  if (error) console.error('createRecharge:', error);
 }
 
-export async function updateRecharge(
-  id: string,
-  patch: Partial<{ status: string; processedAt: string | null }>
-): Promise<void> {
-  const updates: Record<string, unknown> = {};
-  if (patch.status !== undefined) updates.status = patch.status;
-  if (patch.processedAt !== undefined) updates.processed_at = patch.processedAt;
-  const { error } = await supabase.from('engle_recharges').update(updates).eq('id', id);
-  if (error) console.error('updateRecharge:', error);
+export async function updateRecharge(id: string, partial: Partial<Recharge>): Promise<void> {
+  const dbFields: Record<string, any> = {};
+  if (partial.status !== undefined) dbFields.status = partial.status;
+  if (partial.processedAt !== undefined) dbFields.processed_at = partial.processedAt;
+  if (partial.amount !== undefined) dbFields.amount = partial.amount;
+
+  if (Object.keys(dbFields).length > 0) {
+    await supabase.from('samsung_recharges').update(dbFields).eq('id', id);
+  }
 }
+
+// ─── WALLETS ─────────────────────────────────────────────────────────────────
 
 export async function getUserWallets(userId: string): Promise<Wallet[]> {
-  const { data, error } = await supabase.from('engle_wallets').select('*').eq('user_id', userId).order('created_at', { ascending: true });
-  if (error) { console.error('getUserWallets:', error); return []; }
+  const { data } = await supabase.from('samsung_wallets').select('*').eq('user_id', userId).order('created_at', { ascending: false });
   return (data ?? []).map(mapWallet);
 }
 
 export async function saveWallet(wallet: Wallet): Promise<void> {
-  const { error } = await supabase.from('engle_wallets').insert({
+  await supabase.from('samsung_wallets').insert({
     id: wallet.id,
     user_id: wallet.userId,
     type: wallet.type,
     phone: wallet.phone,
     name: wallet.name,
-    created_at: wallet.createdAt,
   });
-  if (error) console.error('saveWallet:', error);
 }
 
 export async function deleteWalletsByUser(userId: string): Promise<void> {
-  const { error } = await supabase.from('engle_wallets').delete().eq('user_id', userId);
-  if (error) console.error('deleteWalletsByUser:', error);
+  await supabase.from('samsung_wallets').delete().eq('user_id', userId);
 }
 
+// ─── WITHDRAWALS ─────────────────────────────────────────────────────────────
+
 export async function getWithdrawals(): Promise<Withdrawal[]> {
-  const { data, error } = await supabase.from('engle_withdrawals').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('getWithdrawals:', error); return []; }
+  const { data } = await supabase.from('samsung_withdrawals').select('*').order('created_at', { ascending: false });
   return (data ?? []).map(mapWithdrawal);
 }
 
 export async function getUserWithdrawals(userId: string): Promise<Withdrawal[]> {
-  const { data, error } = await supabase.from('engle_withdrawals').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-  if (error) { console.error('getUserWithdrawals:', error); return []; }
+  const { data } = await supabase.from('samsung_withdrawals').select('*').eq('user_id', userId).order('created_at', { ascending: false });
   return (data ?? []).map(mapWithdrawal);
 }
 
-export async function createWithdrawal(withdrawal: Withdrawal): Promise<void> {
-  const { error } = await supabase.from('engle_withdrawals').insert({
-    id: withdrawal.id,
-    user_id: withdrawal.userId,
-    user_name: withdrawal.userName,
-    user_phone: withdrawal.userPhone,
-    amount: withdrawal.amount,
-    net_amount: withdrawal.netAmount,
-    wallet_type: withdrawal.walletType,
-    wallet_phone: withdrawal.walletPhone,
-    wallet_name: withdrawal.walletName,
-    status: withdrawal.status,
-    created_at: withdrawal.createdAt,
-    processed_at: withdrawal.processedAt,
+export async function createWithdrawal(w: Withdrawal): Promise<void> {
+  await supabase.from('samsung_withdrawals').insert({
+    id: w.id,
+    user_id: w.userId,
+    user_name: w.userName ?? '',
+    user_phone: w.userPhone ?? '',
+    amount: w.amount,
+    net_amount: w.netAmount,
+    wallet_type: w.walletType,
+    wallet_phone: w.walletPhone,
+    wallet_name: w.walletName,
+    status: w.status,
   });
-  if (error) console.error('createWithdrawal:', error);
 }
 
-export async function updateWithdrawal(
-  id: string,
-  patch: Partial<{ status: string; processedAt: string | null }>
-): Promise<void> {
-  const updates: Record<string, unknown> = {};
-  if (patch.status !== undefined) updates.status = patch.status;
-  if (patch.processedAt !== undefined) updates.processed_at = patch.processedAt;
-  const { error } = await supabase.from('engle_withdrawals').update(updates).eq('id', id);
-  if (error) console.error('updateWithdrawal:', error);
+export async function updateWithdrawal(id: string, partial: Partial<Withdrawal>): Promise<void> {
+  const dbFields: Record<string, any> = {};
+  if (partial.status !== undefined) dbFields.status = partial.status;
+  if (partial.processedAt !== undefined) dbFields.processed_at = partial.processedAt;
+
+  if (Object.keys(dbFields).length > 0) {
+    await supabase.from('samsung_withdrawals').update(dbFields).eq('id', id);
+  }
 }
+
+// ─── REDEEM CODES ─────────────────────────────────────────────────────────────
 
 export async function getRedeemCodes(): Promise<RedeemCode[]> {
-  const { data, error } = await supabase.from('engle_redeem_codes').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('getRedeemCodes:', error); return []; }
+  const { data } = await supabase.from('samsung_redeem_codes').select('*').order('created_at', { ascending: false });
   return (data ?? []).map(mapRedeemCode);
 }
 
 export async function createRedeemCode(code: RedeemCode): Promise<void> {
-  const { error } = await supabase.from('engle_redeem_codes').insert({
+  await supabase.from('samsung_redeem_codes').insert({
     id: code.id,
     code: code.code,
     amount: code.amount,
     expires_at: code.expiresAt,
-    used_by: code.usedBy,
-    is_active: code.isActive,
-    created_at: code.createdAt,
+    used_by: code.usedBy ?? [],
+    is_active: code.isActive ?? true,
   });
-  if (error) console.error('createRedeemCode:', error);
 }
 
 export async function updateRedeemCode(code: RedeemCode): Promise<void> {
-  const { error } = await supabase.from('engle_redeem_codes').update({
+  await supabase.from('samsung_redeem_codes').update({
     used_by: code.usedBy,
     is_active: code.isActive,
   }).eq('id', code.id);
-  if (error) console.error('updateRedeemCode:', error);
 }
 
 export async function deleteRedeemCodeById(id: string): Promise<void> {
-  const { error } = await supabase.from('engle_redeem_codes').delete().eq('id', id);
-  if (error) console.error('deleteRedeemCodeById:', error);
+  await supabase.from('samsung_redeem_codes').delete().eq('id', id);
+}
+
+// ─── DAILY INCOME ENGINE ─────────────────────────────────────────────────────
+
+function isSameDay(dateStr: string): boolean {
+  const d = new Date(dateStr);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
 }
 
 export async function processDailyIncome(): Promise<void> {
-  const user = getCurrentUser();
-  if (!user) return;
-  const { data: products, error } = await supabase.from('engle_products').select('*').eq('user_id', user.id).eq('status', 'active');
-  if (error || !products?.length) return;
+  const products = await getProducts();
+  const activeProducts = products.filter(p => p.status === 'active');
   const now = new Date();
-  for (const row of products) {
-    const product = mapProduct(row);
+
+  for (const product of activeProducts) {
+    // Check if already paid today
+    if (product.lastIncomeDate && isSameDay(product.lastIncomeDate)) continue;
+
+    // Check if expired
     if (product.expiryDate && new Date(product.expiryDate) < now) {
       await updateProduct(product.id, { status: 'expired' });
       continue;
     }
-    const lastIncome = product.lastIncomeDate ? new Date(product.lastIncomeDate) : null;
-    const hoursSince = lastIncome ? (now.getTime() - lastIncome.getTime()) / 3600000 : 25;
-    if (hoursSince < 24) continue;
-    const freshUser = await getUserById(user.id);
-    if (!freshUser) continue;
-    await updateUser(user.id, {
-      balance: freshUser.balance + product.dailyIncome,
-      totalEarnings: freshUser.totalEarnings + product.dailyIncome,
-    });
+
+    // Credit income
+    const user = await getUserById(product.userId);
+    if (!user) continue;
+
+    const newTotalEarned = product.totalIncomeEarned + product.dailyIncome;
     await updateProduct(product.id, {
       lastIncomeDate: now.toISOString(),
-      totalIncomeEarned: product.totalIncomeEarned + product.dailyIncome,
+      totalIncomeEarned: newTotalEarned,
     });
+
+    await updateUser(product.userId, {
+      balance: user.balance + product.dailyIncome,
+      totalEarnings: user.totalEarnings + product.dailyIncome,
+      dailyEarnings: user.dailyEarnings + product.dailyIncome,
+    });
+
     await addNotification({
-      userId: user.id,
+      userId: product.userId,
       type: 'daily_income',
-      title: 'Daily Income Received',
-      message: `You earned UGX ${product.dailyIncome.toLocaleString()} from ${product.packageName}`,
+      title: 'Daily Income Credited',
+      message: `UGX ${product.dailyIncome.toLocaleString()} from ${product.packageName} has been added to your balance.`,
       isRead: false,
     });
   }
 }
 
 export async function runDailyIncomeWithStats(): Promise<{ processed: number; totalPaid: number }> {
-  const { data: products, error } = await supabase.from('engle_products').select('*').eq('status', 'active');
-  if (error || !products?.length) return { processed: 0, totalPaid: 0 };
+  const products = await getProducts();
+  const activeProducts = products.filter(p => p.status === 'active');
   const now = new Date();
+
   let processed = 0;
   let totalPaid = 0;
-  for (const row of products) {
-    const product = mapProduct(row);
+
+  for (const product of activeProducts) {
+    if (product.lastIncomeDate && isSameDay(product.lastIncomeDate)) continue;
+
     if (product.expiryDate && new Date(product.expiryDate) < now) {
       await updateProduct(product.id, { status: 'expired' });
       continue;
     }
-    const lastIncome = product.lastIncomeDate ? new Date(product.lastIncomeDate) : null;
-    const hoursSince = lastIncome ? (now.getTime() - lastIncome.getTime()) / 3600000 : 25;
-    if (hoursSince < 24) continue;
-    const freshUser = await getUserById(product.userId);
-    if (!freshUser) continue;
-    await updateUser(product.userId, {
-      balance: freshUser.balance + product.dailyIncome,
-      totalEarnings: freshUser.totalEarnings + product.dailyIncome,
-    });
+
+    const user = await getUserById(product.userId);
+    if (!user) continue;
+
+    const newTotalEarned = product.totalIncomeEarned + product.dailyIncome;
     await updateProduct(product.id, {
       lastIncomeDate: now.toISOString(),
-      totalIncomeEarned: product.totalIncomeEarned + product.dailyIncome,
+      totalIncomeEarned: newTotalEarned,
     });
+
+    await updateUser(product.userId, {
+      balance: user.balance + product.dailyIncome,
+      totalEarnings: user.totalEarnings + product.dailyIncome,
+      dailyEarnings: user.dailyEarnings + product.dailyIncome,
+    });
+
     await addNotification({
       userId: product.userId,
       type: 'daily_income',
-      title: 'Daily Income Received',
-      message: `You earned UGX ${product.dailyIncome.toLocaleString()} from ${product.packageName}`,
+      title: 'Daily Income Credited',
+      message: `UGX ${product.dailyIncome.toLocaleString()} from ${product.packageName} has been added to your balance.`,
       isRead: false,
     });
+
     processed++;
     totalPaid += product.dailyIncome;
   }
+
   return { processed, totalPaid };
 }
