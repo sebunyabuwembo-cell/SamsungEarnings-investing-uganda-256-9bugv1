@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getUserByPhone, setCurrentUser } from '@/lib/storage';
 import { toast } from 'sonner';
+import { getUserByPhone } from '@/lib/storage';
+import { setCurrentUser } from '@/lib/storage';
 
-const Login: React.FC = () => {
+const Login = () => {
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -29,11 +30,11 @@ const Login: React.FC = () => {
         return;
       }
       if (user.frozen) {
-        toast.error('Your account has been frozen. Please contact support.');
+        toast.error('Your account is frozen. Please contact support.');
         setLoading(false);
         return;
       }
-      await setCurrentUser(user.id);
+      setCurrentUser(user);
       toast.success('Login successful!');
       navigate('/home');
     } catch (err) {
@@ -44,24 +45,21 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-600 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-700 flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-md">
         {/* Logo / Header */}
         <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <svg viewBox="0 0 24 24" className="w-12 h-12 text-blue-700" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-            </svg>
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-lg mb-4">
+            <span className="text-3xl font-bold text-blue-700">S</span>
           </div>
-          <h1 className="text-3xl font-bold text-white">Eagle Investment</h1>
-          <p className="text-blue-200 mt-1">Invest & Grow Daily</p>
+          <h1 className="text-3xl font-bold text-white">Samsung Earnings</h1>
+          <p className="text-blue-200 mt-1">Sign in to your account</p>
         </div>
 
-        {/* Login Card */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Welcome Back</h2>
-
-          <form onSubmit={handleLogin} className="space-y-4">
+        {/* Form Card */}
+        <div className="bg-white rounded-2xl shadow-xl p-8">
+          <h2 className="text-xl font-semibold text-gray-800 mb-6">Welcome Back</h2>
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
               <input
@@ -69,11 +67,10 @@ const Login: React.FC = () => {
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
                 placeholder="e.g. 0712345678"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               />
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
               <input
@@ -81,42 +78,32 @@ const Login: React.FC = () => {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Enter your password"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               />
             </div>
-
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 rounded-lg transition-colors duration-200 mt-2"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 rounded-lg transition-colors duration-200 text-base"
             >
-              {loading ? 'Logging in...' : 'Login'}
+              {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-gray-600">
+            <p className="text-gray-600 text-sm">
               Don't have an account?{' '}
               <Link to="/register" className="text-blue-600 font-semibold hover:underline">
-                Register here
+                Register
               </Link>
             </p>
-          </div>
-
-          <div className="mt-4 text-center">
-            <Link
-              to="/change-password"
-              className="text-sm text-gray-500 hover:text-blue-600 transition-colors"
-            >
-              Forgot Password?
-            </Link>
           </div>
         </div>
 
         {/* Footer note */}
-        <p className="text-center text-blue-200 text-sm mt-6">
-          © 2024 Eagle Investment Uganda
+        <p className="text-center text-blue-200 text-xs mt-6">
+          Samsung Earnings Platform &copy; {new Date().getFullYear()}
         </p>
       </div>
     </div>
