@@ -15,6 +15,19 @@ export function getCurrentUser(): User | null {
   }
 }
 
+export async function refreshCurrentUser(): Promise<User | null> {
+  try {
+    const raw = sessionStorage.getItem(USER_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as User;
+    const fresh = await getUserById(cached.id);
+    if (fresh) setCurrentUser(fresh);
+    return fresh;
+  } catch {
+    return null;
+  }
+}
+
 export function setCurrentUser(user: User | null): void {
   if (user) {
     sessionStorage.setItem(USER_KEY, JSON.stringify(user));
