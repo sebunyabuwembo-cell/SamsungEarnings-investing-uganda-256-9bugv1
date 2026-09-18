@@ -2,242 +2,284 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  getCurrentUser, refreshCurrentUser, createProduct, updateUser,
-  getUserProducts, getUserRecharges,
+  getCurrentUser,
+  createProduct,
+  updateUser,
+  addNotification,
+  getRechargesByUserId,
+  getUserById,
 } from '@/lib/storage';
-import { PACKAGES } from '@/constants/packages';
-import { UserProduct, Recharge } from '@/types';
-
-const fmt = (n: number) => `UGX ${Number(n).toLocaleString()}`;
+import { PACKAGES, PackageGroup } from '@/constants/packages';
+import type { SamsungUser, SamsungRecharge } from '@/types';
 
 const Product = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState(getCurrentUser());
-  const [myProducts, setMyProducts] = useState<UserProduct[]>([]);
-  const [pendingRecharges, setPendingRecharges] = useState<Recharge[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [buyingId, setBuyingId] = useState<string | null>(null);
-  const [proofModal, setProofModal] = useState<{ packageId: string; packageName: string; price: number } | null>(null);
-  const [proofText, setProofText] = useState('');
+  const [user, setUser] = useState<SamsungUser | null>(null);
+  const [pendingRecharge, setPendingRecharge] = useState<SamsungRecharge | null>(null);
+  const [buying, setBuying] = useState<string | null>(null);
+  const [confirmPkg, setConfirmPkg] = useState<typeof PACKAGES[0] | null>(null);
 
   useEffect(() => {
-    if (!user) { navigate('/login'); return; }
-    loadData();
-  }, []);
+    const u = getCurrentUser();
+    if (!u) { navigate('/login'); return; }
+    setUser(u);
+    loadPendingRecharge(u.id);
+  }, [navigate]);
 
-  const loadData = async () => {
-    try {
-      const freshUser = await refreshCurrentUser();
-      const current = freshUser || getCurrentUser();
-      if (!current) { navigate('/login'); return; }
-      setUser(current);
-      const [prods, recharges] = await Promise.all([
-        getUserProducts(current.id),
-        getUserRecharges(current.id),
-      ]);
-      setMyProducts(prods);
-      setPendingRecharges(recharges.filter(r => r.status === 'pending'));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false); // FIX: always stop loading so button becomes clickable
-    }
+  const loadPendingRecharge = async (userId: string) => {
+    const recharges = await getRechargesByUserId(userId);
+    const pending = recharges.find(r => r.status === 'pending') || null;
+    setPendingRecharge(pending);
   };
 
-  const handleBuy = async (packageId: string, price: number, packageName: string) => {
+  const handleBuy = async (pkg: typeof PACKAGES[0]) => {
     if (!user) return;
-    if (user.frozen) { toast.error('Your account is frozen. Contact support.'); return; }
-    if (user.balance < price) {
-      toast.error(`Insufficient balance. You have ${fmt(user.balance)}, need ${fmt(price)}. Please deposit.`);
-      navigate('/deposit'); // FIX: send to deposit
+
+    const freshUser = await getUserById(user.id);
+    if (!freshUser) { toast.error('Session error. Please login again.'); return; }
+
+    if (freshUser.frozen) {
+      toast.error('Your account is frozen. Contact support.');
       return;
     }
-    setProofModal({ packageId, packageName, price });
-  };
 
-  const confirmBuy = async () => {
-    if (!user || !proofModal) return;
-    setBuyingId(proofModal.packageId);
+    if (freshUser.balance < pkg.price) {
+      toast.error(`Insufficient balance. Need UGX ${pkg.price.toLocaleString()}, have UGX ${freshUser.balance.toLocaleString()}`);
+      return;
+    }
 
-    const pkg = PACKAGES.find(p => p.id === proofModal.packageId);
-    if (!pkg) { setBuyingId(null); return; }
-
+    setBuying(pkg.id);
     try {
-      const product: UserProduct = {
-        id: crypto.randomUUID(),
-        userId: user.id,
-        packageId: pkg.id,
-        packageName: pkg.name,
-        packagePrice: pkg.price,
-        dailyIncome: pkg.dailyIncome,
+      const now = new Date();
+      const expiry = new Date(now);
+      expiry.setDate(expiry.getDate() + pkg.duration);
+
+      const newBalance = freshUser.balance - pkg.price;
+      await updateUser(user.id, { balance: newBalance });
+
+      await createProduct({
+        user_id: user.id,
+        package_id: pkg.id,
+        package_name: pkg.name,
+        package_price: pkg.price,
+        daily_income: pkg.dailyIncome,
         duration: pkg.duration,
-        status: 'pending',
-        buyDate: new Date().toISOString(),
-        expiryDate: null,
-        lastIncomeDate: null,
-        totalIncomeEarned: 0,
-        paymentProof: proofText.trim(),
-      };
+        status: 'active',
+        buy_date: now.toISOString(),
+        expiry_date: expiry.toISOString(),
+        last_income_date: now.toISOString(),
+        total_income_earned: 0,
+        payment_proof: '',
+      });
 
-      await createProduct(product);
-      await updateUser(user.id, { balance: user.balance - pkg.price });
+      await addNotification(
+        user.id,
+        'purchase',
+        'Package Purchased',
+        `You successfully purchased ${pkg.name} for UGX ${pkg.price.toLocaleString()}. Daily income: UGX ${pkg.dailyIncome.toLocaleString()} for ${pkg.duration} days.`
+      );
 
-      toast.success(`${pkg.name} purchased! Awaiting admin activation.`);
-      setProofModal(null);
-      setProofText('');
-      await loadData();
-    } catch (e) {
-      toast.error('Purchase failed');
+      setUser({ ...freshUser, balance: newBalance });
+      toast.success(`${pkg.name} purchased! Daily income: UGX ${pkg.dailyIncome.toLocaleString()}`);
+      setConfirmPkg(null);
+      navigate('/my-product');
+    } catch (err) {
+      console.error('Purchase error:', err);
+      toast.error('Purchase failed. Please try again.');
     } finally {
-      setBuyingId(null);
+      setBuying(null);
     }
   };
 
-  const getActivePackage = (packageId: string) =>
-    myProducts.find(p => p.packageId === packageId && (p.status === 'active' || p.status === 'pending'));
+  const groupedPackages: Record<string, typeof PACKAGES> = {};
+  PACKAGES.forEach(pkg => {
+    if (!groupedPackages[pkg.group]) groupedPackages[pkg.group] = [];
+    groupedPackages[pkg.group].push(pkg);
+  });
 
-  if (!user && loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  }
-  if (!user) return null;
-
-  const totalPending = pendingRecharges.reduce((s, r) => s + r.amount, 0);
+  const groupColors: Record<string, { bg: string; badge: string; text: string }> = {
+    [PackageGroup.Starter]: { bg: 'from-green-500 to-green-600', badge: 'bg-green-100 text-green-700', text: 'text-green-600' },
+    [PackageGroup.Growth]: { bg: 'from-blue-500 to-blue-700', badge: 'bg-blue-100 text-blue-700', text: 'text-blue-600' },
+    [PackageGroup.Premium]: { bg: 'from-purple-600 to-purple-800', badge: 'bg-purple-100 text-purple-700', text: 'text-purple-600' },
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24">
-      <div className="bg-blue-900 text-white px-4 py-4 shadow">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate(-1)} className="p-1">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h1 className="text-lg font-bold">Investment Packages</h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-blue-700 text-white px-4 py-4 flex items-center gap-3">
+        <button onClick={() => navigate('/home')} className="p-1">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <h1 className="text-lg font-semibold">Investment Packages</h1>
+        {user && (
+          <div className="ml-auto text-right">
+            <p className="text-xs text-blue-200">Balance</p>
+            <p className="text-sm font-bold">UGX {user.balance.toLocaleString()}</p>
           </div>
-          <div className="text-right">
-            <div className="text-xs text-blue-200">Balance</div>
-            <div className="font-bold text-sm">{fmt(user.balance)}</div>
-          </div>
-        </div>
+        )}
       </div>
 
-      <div className="p-4 space-y-4">
-        {pendingRecharges.length > 0 && (
-          <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-4">
-            <div className="flex items-start gap-2">
-              <span className="text-yellow-500 text-lg">⏳</span>
-              <div>
-                <div className="font-semibold text-yellow-800 text-sm">Pending Recharge</div>
-                <div className="text-yellow-700 text-xs mt-0.5">
-                  You have pending <strong>{fmt(totalPending)}</strong> awaiting approval.
-                </div>
-              </div>
-            </div>
+      {/* Pending recharge banner */}
+      {pendingRecharge && (
+        <div className="mx-4 mt-4 bg-yellow-50 border border-yellow-300 rounded-xl p-3 flex items-start gap-2">
+          <span className="text-yellow-500 text-lg mt-0.5">⏳</span>
+          <div>
+            <p className="text-yellow-800 font-semibold text-sm">Pending Recharge</p>
+            <p className="text-yellow-700 text-xs mt-0.5">
+              You have a pending recharge of UGX {Number(pendingRecharge.amount).toLocaleString()} awaiting admin approval. Your balance will update once approved.
+            </p>
           </div>
-        )}
+        </div>
+      )}
 
-        {user.frozen && (
-          <div className="bg-red-50 border border-red-300 rounded-xl p-4 text-red-700 text-sm font-medium">
-            ⚠️ Account frozen. Purchases disabled.
+      {/* Frozen banner */}
+      {user?.frozen && (
+        <div className="mx-4 mt-4 bg-red-50 border border-red-300 rounded-xl p-3 flex items-start gap-2">
+          <span className="text-red-500 text-lg mt-0.5">🔒</span>
+          <div>
+            <p className="text-red-800 font-semibold text-sm">Account Frozen</p>
+            <p className="text-red-700 text-xs mt-0.5">Your account is currently frozen. You cannot purchase packages. Contact support.</p>
           </div>
-        )}
+        </div>
+      )}
 
-        {[1, 2, 3].map(group => {
-          const groupPackages = PACKAGES.filter(p => p.group === group);
-          const groupNames = ['Starter Packages', 'Growth Packages', 'Premium Packages'];
-          const groupColors = ['from-blue-500 to-blue-700', 'from-green-500 to-green-700', 'from-purple-600 to-purple-900'];
+      {/* Package groups */}
+      <div className="px-4 py-4 space-y-6 pb-24">
+        {Object.entries(groupedPackages).map(([group, pkgs]) => {
+          const colors = groupColors[group] || groupColors[PackageGroup.Starter];
           return (
             <div key={group}>
-              <div className={`bg-gradient-to-r ${groupColors[group - 1]} text-white rounded-xl px-4 py-2.5 mb-3`}>
-                <h2 className="font-bold text-sm">{groupNames[group - 1]}</h2>
+              <div className={`bg-gradient-to-r ${colors.bg} text-white rounded-xl px-4 py-3 mb-3`}>
+                <h2 className="font-bold text-lg">{group}</h2>
+                <p className="text-xs text-white text-opacity-80 mt-0.5">
+                  {group === PackageGroup.Premium ? '30-day duration' : group === PackageGroup.Growth ? '90-day duration' : '60-day duration'}
+                </p>
               </div>
-              <div className="grid grid-cols-1 gap-3">
-                {groupPackages.map(pkg => {
-                  const owned = getActivePackage(pkg.id);
-                  const canAfford = user.balance >= pkg.price;
-                  return (
-                    <div key={pkg.id} className="bg-white rounded-2xl shadow-md overflow-hidden">
-                      <div className="relative h-36 overflow-hidden">
-                        <img src={pkg.image} alt={pkg.name} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-                        <div className="absolute bottom-3 left-3">
-                          <div className="text-white font-bold text-lg leading-none">{pkg.name}</div>
-                          <div className="text-white/80 text-xs">{pkg.duration} days</div>
+
+              <div className="space-y-3">
+                {pkgs.map(pkg => (
+                  <div key={pkg.id} className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+                    <div className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="font-semibold text-gray-800 text-sm">{pkg.name}</h3>
+                          <span className={`inline-block text-xs px-2 py-0.5 rounded-full mt-1 ${colors.badge}`}>{group}</span>
                         </div>
-                        {owned && (
-                          <div className={`absolute top-3 right-3 text-xs px-2 py-1 rounded-full font-bold ${
-                            owned.status === 'active' ? 'bg-green-500 text-white' : 'bg-yellow-400 text-yellow-900'
-                          }`}>
-                            {owned.status === 'active' ? '✓ Active' : '⏳ Pending'}
-                          </div>
-                        )}
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400">Price</p>
+                          <p className={`font-bold text-base ${colors.text}`}>UGX {pkg.price.toLocaleString()}</p>
+                        </div>
                       </div>
 
-                      <div className="p-4">
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                          <div className="bg-blue-50 rounded-xl p-3 text-center">
-                            <div className="text-xs text-blue-500 font-medium">Package Price</div>
-                            <div className="font-bold text-blue-800 text-sm mt-0.5">{fmt(pkg.price)}</div>
-                          </div>
-                          <div className="bg-green-50 rounded-xl p-3 text-center">
-                            <div className="text-xs text-green-500 font-medium">Daily Income</div>
-                            <div className="font-bold text-green-700 text-sm mt-0.5">{fmt(pkg.dailyIncome)}</div>
-                          </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div className="bg-gray-50 rounded-lg p-2 text-center">
+                          <p className="text-xs text-gray-400">Daily Income</p>
+                          <p className="text-xs font-bold text-green-600">UGX {pkg.dailyIncome.toLocaleString()}</p>
                         </div>
-
-                        <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                          <span>Duration: <strong>{pkg.duration} days</strong></span>
-                          <span>Total: <strong className="text-green-600">{fmt(pkg.dailyIncome * pkg.duration)}</strong></span>
+                        <div className="bg-gray-50 rounded-lg p-2 text-center">
+                          <p className="text-xs text-gray-400">Duration</p>
+                          <p className="text-xs font-bold text-gray-700">{pkg.duration} days</p>
                         </div>
-
-                        {owned ? (
-                          <div className="w-full bg-gray-100 text-gray-500 font-semibold py-2.5 rounded-xl text-center text-sm">
-                            {owned.status === 'active' ? 'Package Active' : 'Awaiting Activation'}
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => handleBuy(pkg.id, pkg.price, pkg.name)}
-                            disabled={!!buyingId || user.frozen}
-                            className={`w-full font-semibold py-2.5 rounded-xl transition text-sm text-white ${
-                              !canAfford ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'
-                            } disabled:bg-gray-300`}
-                          >
-                            {buyingId === pkg.id ? 'Processing...' : canAfford ? `Buy — ${fmt(pkg.price)}` : `Deposit to Buy — ${fmt(pkg.price)}`}
-                          </button>
-                        )}
+                        <div className="bg-gray-50 rounded-lg p-2 text-center">
+                          <p className="text-xs text-gray-400">Total Return</p>
+                          <p className="text-xs font-bold text-blue-600">UGX {(pkg.dailyIncome * pkg.duration).toLocaleString()}</p>
+                        </div>
                       </div>
+
+                      <button
+                        onClick={() => setConfirmPkg(pkg)}
+                        disabled={!!buying || user?.frozen}
+                        className={`mt-3 w-full py-2.5 rounded-lg text-white text-sm font-semibold transition-colors bg-gradient-to-r ${colors.bg} disabled:opacity-50`}
+                      >
+                        {buying === pkg.id ? 'Processing...' : 'Buy Now'}
+                      </button>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
           );
         })}
       </div>
 
-      {proofModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="font-bold text-gray-800 text-lg mb-1">Confirm Purchase</h3>
-            <p className="text-sm text-gray-500 mb-4">{proofModal.packageName} — {fmt(proofModal.price)}</p>
-            <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm text-gray-600">
-              <strong>{fmt(proofModal.price)}</strong> will be deducted from balance <strong>{fmt(user.balance)}</strong>.
+      {/* Confirm modal */}
+      {confirmPkg && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end justify-center">
+          <div className="bg-white rounded-t-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-bold text-gray-800 text-center mb-1">Confirm Purchase</h3>
+            <p className="text-gray-500 text-sm text-center mb-4">You are about to buy:</p>
+
+            <div className="bg-blue-50 rounded-xl p-4 space-y-2 mb-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Package</span>
+                <span className="font-semibold text-gray-800">{confirmPkg.name}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Price</span>
+                <span className="font-bold text-red-600">UGX {confirmPkg.price.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Daily Income</span>
+                <span className="font-bold text-green-600">UGX {confirmPkg.dailyIncome.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Duration</span>
+                <span className="font-semibold text-gray-800">{confirmPkg.duration} days</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Your Balance</span>
+                <span className={`font-semibold ${(user?.balance || 0) >= confirmPkg.price ? 'text-green-600' : 'text-red-600'}`}>
+                  UGX {(user?.balance || 0).toLocaleString()}
+                </span>
+              </div>
             </div>
-            <textarea
-              value={proofText}
-              onChange={e => setProofText(e.target.value)}
-              placeholder="Payment reference (optional)"
-              className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={2}
-            />
-            <div className="flex gap-2 mt-4">
-              <button onClick={() => { setProofModal(null); setProofText(''); }} className="flex-1 py-2.5 border rounded-xl text-sm font-medium">Cancel</button>
-              <button onClick={confirmBuy} disabled={!!buyingId} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold">Confirm Buy</button>
+
+            {(user?.balance || 0) < confirmPkg.price && (
+              <p className="text-red-600 text-xs text-center mb-3">
+                Insufficient balance. Please recharge first.
+              </p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmPkg(null)}
+                className="flex-1 py-3 rounded-xl border border-gray-300 text-gray-700 font-semibold text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleBuy(confirmPkg)}
+                disabled={!!buying || (user?.balance || 0) < confirmPkg.price}
+                className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold text-sm transition-colors"
+              >
+                {buying ? 'Processing...' : 'Confirm'}
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Bottom nav */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-2 z-40">
+        {[
+          { icon: '🏠', label: 'Home', path: '/home' },
+          { icon: '📦', label: 'Product', path: '/product' },
+          { icon: '💳', label: 'Recharge', path: '/recharge' },
+          { icon: '💰', label: 'Withdraw', path: '/withdraw' },
+          { icon: '👤', label: 'Mine', path: '/mine' },
+        ].map(item => (
+          <button
+            key={item.path}
+            onClick={() => navigate(item.path)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1 ${item.path === '/product' ? 'text-blue-600' : 'text-gray-400'}`}
+          >
+            <span className="text-xl">{item.icon}</span>
+            <span className="text-xs">{item.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 };
