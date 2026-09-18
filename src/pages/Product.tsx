@@ -6,7 +6,7 @@ import {
   createProduct,
   updateUser,
   addNotification,
-  getRechargesByUserId,
+  getUserRecharges,
   getUserById,
 } from '@/lib/storage';
 import { PACKAGES, PackageGroup } from '@/constants/packages';
@@ -27,7 +27,7 @@ const Product = () => {
   }, [navigate]);
 
   const loadPendingRecharge = async (userId: string) => {
-    const recharges = await getRechargesByUserId(userId);
+    const recharges = await getUserRecharges(userId);
     const pending = recharges.find(r => r.status === 'pending') || null;
     setPendingRecharge(pending);
   };

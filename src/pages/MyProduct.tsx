@@ -1,94 +1,222 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock } from 'lucide-react';
-import { getCurrentUser, refreshCurrentUser, getUserProducts } from '@/lib/storage';
-import { formatUGX, formatDate, daysLeft } from '@/lib/utils';
-import { UserProduct } from '@/types';
-
-const statusColors: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700',
-  active: 'bg-green-100 text-green-700',
-  expired: 'bg-gray-100 text-gray-500',
-};
+import { getCurrentUser, getUserProducts } from '@/lib/storage';
+import type { User, UserProduct } from '@/types';
 
 const MyProduct = () => {
   const navigate = useNavigate();
+  const [user, setUser] = useState<User | null>(null);
   const [products, setProducts] = useState<UserProduct[]>([]);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'active' | 'expired'>('all');
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'active' | 'expired'>('active');
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        let u = getCurrentUser();
-        if (!u) u = await refreshCurrentUser();
-        if (!u) { navigate('/login'); return; }
-
-        console.log('Loading products for user:', u.id);
-        const prods = await getUserProducts(u.id);
-        console.log('Products found:', prods.length, prods);
-        setProducts([...prods].reverse());
-      } catch (e) {
-        console.error('Load products error:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
+    const u = getCurrentUser();
+    if (!u) { navigate('/login'); return; }
+    setUser(u);
+    loadProducts(u.id);
   }, [navigate]);
 
-  const filtered = filter === 'all'? products : products.filter((p) => p.status === filter);
+  const loadProducts = async (userId: string) => {
+    setLoading(true);
+    try {
+      const data = await getUserProducts(userId);
+      setProducts(data);
+    } catch (err) {
+      console.error('Failed to load products:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading your products...</div>;
+  const activeProducts = products.filter(p => p.status === 'active');
+  const expiredProducts = products.filter(p => p.status === 'expired');
+  const displayProducts = tab === 'active' ? activeProducts : expiredProducts;
+
+  const getProgressPercent = (product: UserProduct) => {
+    if (!product.buyDate || !product.expiryDate) return 0;
+    const total = new Date(product.expiryDate).getTime() - new Date(product.buyDate).getTime();
+    const elapsed = Date.now() - new Date(product.buyDate).getTime();
+    return Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)));
+  };
+
+  const getDaysLeft = (product: UserProduct) => {
+    if (!product.expiryDate) return 0;
+    const diff = new Date(product.expiryDate).getTime() - Date.now();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  };
 
   return (
-    <div className="app-container min-h-screen bg-gray-50 pb-24">
-      <div className="flex items-center px-4 py-4 bg-white border-b border-gray-100">
-        <button onClick={() => navigate(-1)} className="mr-3"><ArrowLeft className="w-6 h-6 text-gray-700" /></button>
-        <h1 className="text-gray-800 font-bold text-lg">My Products</h1>
-        <span className="ml-2 text-xs bg-gray-100 px-2 py-1 rounded-full">{products.length}</span>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-blue-700 text-white px-4 py-4 flex items-center gap-3">
+        <button onClick={() => navigate('/home')} className="p-1">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <h1 className="text-lg font-semibold">My Packages</h1>
+        <div className="ml-auto text-right">
+          <p className="text-xs text-blue-200">Total Packages</p>
+          <p className="text-sm font-bold">{products.length}</p>
+        </div>
       </div>
 
-      <div className="flex gap-2 px-4 py-3 bg-white border-b border-gray-100 overflow-x-auto scrollbar-hide">
-        {['all', 'pending', 'active', 'expired'].map((f) => (
-          <button key={f} onClick={() => setFilter(f as typeof filter)} className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${filter === f? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{f} {f!== 'all' && `(${products.filter(p=>p.status===f).length})`}</button>
-        ))}
+      {/* Summary cards */}
+      <div className="px-4 pt-4 grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <p className="text-xs text-gray-400">Active Packages</p>
+          <p className="text-2xl font-bold text-green-600 mt-1">{activeProducts.length}</p>
+        </div>
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <p className="text-xs text-gray-400">Total Earned</p>
+          <p className="text-lg font-bold text-blue-600 mt-1">
+            UGX {products.reduce((sum, p) => sum + Number(p.totalIncomeEarned || 0), 0).toLocaleString()}
+          </p>
+        </div>
       </div>
 
-      <div className="px-4 py-4 space-y-4">
-        {filtered.length === 0? (
-          <div className="text-center py-16">
-            <div className="text-5xl mb-4">📦</div>
-            <div className="text-gray-500 font-medium">No {filter!== 'all'? filter : ''} products found</div>
-            <div className="text-gray-400 text-xs mt-2">Total products in account: {products.length}</div>
-            {products.length === 0 && <div className="text-amber-600 text-xs mt-3 px-4">If you just bought, check admin panel → approve pending product</div>}
-            <button onClick={() => navigate('/product')} className="mt-4 bg-blue-600 text-white px-6 py-2.5 rounded-xl text-sm font-semibold">Buy a Package</button>
+      {/* Tabs */}
+      <div className="px-4 mt-4 flex gap-2">
+        <button
+          onClick={() => setTab('active')}
+          className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+            tab === 'active'
+              ? 'bg-blue-600 text-white'
+              : 'bg-white text-gray-500 border border-gray-200'
+          }`}
+        >
+          Active ({activeProducts.length})
+        </button>
+        <button
+          onClick={() => setTab('expired')}
+          className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+            tab === 'expired'
+              ? 'bg-blue-600 text-white'
+              : 'bg-white text-gray-500 border border-gray-200'
+          }`}
+        >
+          Expired ({expiredProducts.length})
+        </button>
+      </div>
+
+      {/* Products list */}
+      <div className="px-4 py-4 space-y-3 pb-24">
+        {loading ? (
+          <div className="text-center py-12 text-gray-400">
+            <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
+            <p className="text-sm">Loading packages...</p>
+          </div>
+        ) : displayProducts.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <span className="text-3xl">📦</span>
+            </div>
+            <p className="text-gray-500 text-sm font-medium">
+              {tab === 'active' ? 'No active packages' : 'No expired packages'}
+            </p>
+            {tab === 'active' && (
+              <button
+                onClick={() => navigate('/product')}
+                className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium"
+              >
+                Browse Packages
+              </button>
+            )}
           </div>
         ) : (
-          filtered.map((p) => (
-            <div key={p.id} className="bg-white rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-gray-800 font-bold text-base">{p.packageName}</div>
-                <span className={`text-xs px-2 py-1 rounded-full font-semibold capitalize ${statusColors[p.status] || 'bg-gray-100'}`}>{p.status}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="bg-gray-50 rounded-xl p-2.5"><div className="text-gray-400 text-xs">Investment</div><div className="text-gray-800 font-bold text-sm">{formatUGX(p.packagePrice)}</div></div>
-                <div className="bg-gray-50 rounded-xl p-2.5"><div className="text-gray-400 text-xs">Daily Income</div><div className="text-green-600 font-bold text-sm">{formatUGX(p.dailyIncome)}</div></div>
-                <div className="bg-gray-50 rounded-xl p-2.5"><div className="text-gray-400 text-xs">Buy Date</div><div className="text-gray-700 font-medium text-xs">{p.buyDate? formatDate(p.buyDate) : 'Pending'}</div></div>
-                <div className="bg-gray-50 rounded-xl p-2.5"><div className="text-gray-400 text-xs">Expiry Date</div><div className="text-gray-700 font-medium text-xs">{p.expiryDate? formatDate(p.expiryDate) : 'After approval'}</div></div>
-              </div>
-              {p.status === 'active' && p.expiryDate && (
-                <div className="flex items-center justify-between bg-green-50 rounded-xl px-3 py-2">
-                  <div className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-green-600" /><span className="text-green-700 text-sm font-medium">{daysLeft(p.expiryDate)} days left</span></div>
-                  <div className="text-green-700 text-sm font-bold">Earned: {formatUGX(p.totalIncomeEarned || 0)}</div>
+          displayProducts.map(product => {
+            const progress = getProgressPercent(product);
+            const daysLeft = getDaysLeft(product);
+            const isActive = product.status === 'active';
+
+            return (
+              <div key={product.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                {/* Status bar */}
+                <div className={`px-4 py-2 flex items-center justify-between ${isActive ? 'bg-green-50' : 'bg-gray-50'}`}>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                    isActive ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'
+                  }`}>
+                    {isActive ? '● Active' : '✓ Expired'}
+                  </span>
+                  {isActive && (
+                    <span className="text-xs text-gray-500">{daysLeft} days left</span>
+                  )}
                 </div>
-              )}
-              {p.status === 'pending' && (
-                <div className="bg-amber-50 rounded-xl px-3 py-2 text-center"><p className="text-amber-700 text-xs">⏳ Awaiting admin approval to start earning</p></div>
-              )}
-            </div>
-          ))
+
+                <div className="p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <h3 className="font-semibold text-gray-800 text-sm">{product.packageName}</h3>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Purchased {product.buyDate ? new Date(product.buyDate).toLocaleDateString() : 'N/A'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400">Invested</p>
+                      <p className="text-sm font-bold text-gray-800">UGX {Number(product.packagePrice).toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="bg-gray-50 rounded-lg p-2 text-center">
+                      <p className="text-xs text-gray-400">Daily</p>
+                      <p className="text-xs font-bold text-green-600">UGX {Number(product.dailyIncome).toLocaleString()}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-2 text-center">
+                      <p className="text-xs text-gray-400">Earned</p>
+                      <p className="text-xs font-bold text-blue-600">UGX {Number(product.totalIncomeEarned || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-2 text-center">
+                      <p className="text-xs text-gray-400">Duration</p>
+                      <p className="text-xs font-bold text-gray-700">{product.duration} days</p>
+                    </div>
+                  </div>
+
+                  {isActive && (
+                    <div>
+                      <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>Progress</span>
+                        <span>{progress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-green-500 h-2 rounded-full transition-all"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                      {product.expiryDate && (
+                        <p className="text-xs text-gray-400 mt-1 text-right">
+                          Expires {new Date(product.expiryDate).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
         )}
+      </div>
+
+      {/* Bottom nav */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-2 z-40">
+        {[
+          { icon: '🏠', label: 'Home', path: '/home' },
+          { icon: '📦', label: 'Product', path: '/product' },
+          { icon: '💳', label: 'Recharge', path: '/recharge' },
+          { icon: '💰', label: 'Withdraw', path: '/withdraw' },
+          { icon: '👤', label: 'Mine', path: '/mine' },
+        ].map(item => (
+          <button
+            key={item.path}
+            onClick={() => navigate(item.path)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1 ${item.path === '/my-product' ? 'text-blue-600' : 'text-gray-400'}`}
+          >
+            <span className="text-xl">{item.icon}</span>
+            <span className="text-xs">{item.label}</span>
+          </button>
+        ))}
       </div>
     </div>
   );
