@@ -1,93 +1,110 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useToast } from '@/hooks/use-toast';
+import { useNavigate, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { getUserByPhone, setCurrentUser } from '@/lib/storage';
 
 const Login = () => {
+  const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const { toast } = useToast();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!phone ||!password) {
-      toast({ title: "Error", description: "Please fill in all fields", variant: "destructive" });
-      return;
-    }
+  const handleLogin = async () => {
+    if (!phone.trim()) { toast.error('Please enter your phone number'); return; }
+    if (!password.trim()) { toast.error('Please enter your password'); return; }
+
     setLoading(true);
     try {
       const user = await getUserByPhone(phone.trim());
       if (!user) {
-        toast({ title: "Login Failed", description: "Number not registered. Please register first.", variant: "destructive" });
+        toast.error('Phone number not registered');
         setLoading(false);
         return;
       }
-      if (user.password!== password) {
-        toast({ title: "Login Failed", description: "Wrong password", variant: "destructive" });
-        setLoading(false);
-        return;
-      }
-      if (user.frozen) {
-        toast({ title: "Account Frozen", description: "Your account is frozen. Contact support.", variant: "destructive" });
+      if (user.password !== password) {
+        toast.error('Incorrect password');
         setLoading(false);
         return;
       }
       setCurrentUser(user);
-      toast({ title: "Success", description: "Welcome back!" });
+      toast.success(`Welcome back, ${user.name}!`);
       navigate('/home');
-    } catch (error) {
-      console.error(error);
-      toast({ title: "Error", description: "Login failed", variant: "destructive" });
-    } finally {
+    } catch (err) {
+      console.error('Login error:', err);
+      toast.error('Login failed. Please try again.');
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-800 to-blue-600 p-4">
-      <div className="text-center mb-8">
-        <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-bold text-blue-700">E</div>
-        <h1 className="text-3xl font-bold text-white">Eagle Investment</h1>
-        <p className="text-blue-200">Sign in to your account</p>
+    <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-700 flex flex-col items-center justify-center px-4">
+      {/* Admin flower icon - top left */}
+      <div className="absolute top-4 left-4">
+        <button
+          onClick={() => navigate('/admin')}
+          className="w-10 h-10 flex items-center justify-center rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors"
+          title="Admin Panel"
+        >
+          <span className="text-xl">🌸</span>
+        </button>
       </div>
 
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Welcome Back</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input id="phone" type="tel" placeholder="e.g. 0712345678" value={phone} onChange={(e) => setPhone(e.target.value)} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading? 'Signing in...' : 'Sign In'}
-            </Button>
-          </form>
-          <div className="mt-6 text-center text-sm">
-            Don't have an account? <Link to="/register" className="text-blue-600 font-semibold hover:underline">Register</Link>
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-3 shadow-lg">
+            <span className="text-blue-700 font-bold text-2xl">SE</span>
           </div>
-        </CardContent>
-      </Card>
-      <p className="text-blue-200 text-xs mt-6">Eagle Investment Platform © 2024</p>
+          <h1 className="text-white text-2xl font-bold">Samsung Earnings</h1>
+          <p className="text-blue-200 text-sm mt-1">Sign in to your account</p>
+        </div>
 
-      {/* SECRET ADMIN FLOWER 🌺 - CLICK TO ADMIN LOGIN */}
-      <Link to="/admin" className="mt-6 bg-white/10 hover:bg-white/20 border border-white/20 p-3 rounded-full transition-all flex items-center justify-center">
-        <span className="text-2xl">🌺</span>
-      </Link>
-      <p className="text-blue-300 text-[10px] mt-2 opacity-60">Admin</p>
+        {/* Form */}
+        <div className="bg-white rounded-2xl p-6 shadow-xl">
+          <h2 className="text-gray-800 text-xl font-semibold mb-5 text-center">Login</h2>
 
+          <div className="space-y-4">
+            <div>
+              <label className="block text-gray-600 text-sm font-medium mb-1">Phone Number</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="e.g. 0771234567"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              />
+            </div>
+
+            <div>
+              <label className="block text-gray-600 text-sm font-medium mb-1">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogin}
+            disabled={loading}
+            className="mt-6 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+          >
+            {loading ? 'Signing In...' : 'Login'}
+          </button>
+
+          <p className="text-center text-gray-500 text-sm mt-4">
+            Don't have an account?{' '}
+            <Link to="/register" className="text-blue-600 font-medium hover:underline">
+              Register
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 };
