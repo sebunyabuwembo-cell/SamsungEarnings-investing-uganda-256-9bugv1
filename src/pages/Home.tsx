@@ -1,371 +1,269 @@
-import { useState, useEffect, useRef } from 'react';
-import { toast } from 'sonner';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, RefreshCw, X, CheckCheck, Package, DollarSign, CreditCard, Gift, ChevronRight, Copy, Users } from 'lucide-react';
+import { toast } from 'sonner';
+import { Bell, Copy, Users, Package, TrendingUp, Gift } from 'lucide-react';
 import AppLayout from '@/components/layout/AppLayout';
-import NotifyModal from '@/components/features/NotifyModal';
 import {
-  getCurrentUser, refreshCurrentUser, getUserProducts, getUserNotifications,
-  markNotificationRead, processDailyIncome, getUserRecharges, getUserById
+  getCurrentUser, refreshCurrentUser, getUserNotifications,
+  markNotificationRead,
 } from '@/lib/storage';
-import { formatUGX, formatDateTime, getReferralLink } from '@/lib/utils';
-import { PACKAGES } from '@/constants/packages';
-import { User, Notification, UserProduct } from '@/types';
-import heroBanner from '@/assets/hero-banner.jpg';
+import { formatUGX, formatDateTime } from '@/lib/utils';
+import { User, Notification } from '@/types';
+import { REGISTRATION_BONUS } from '@/constants/packages';
 
 const Home = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
-  const [showNotify, setShowNotify] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [showBell, setShowBell] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [products, setProducts] = useState<UserProduct[]>([]);
-  const [pendingRecharges, setPendingRecharges] = useState(0);
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const [recentActivity] = useState([
-    '0782****407 Recharge 15,000',
-    '0746****840 Recharge 50,000',
-    '0701****123 Recharge 150,000',
-    '0782****999 Recharge 300,000',
-    '0746****555 Recharge 100,000',
-  ]);
-
-  const loadData = async (userId: string) => {
-    try {
-      const [notifs, prods, recharges] = await Promise.all([
-        getUserNotifications(userId),
-        getUserProducts(userId),
-        getUserRecharges(userId),
-      ]);
-      setUnreadCount(notifs.filter((n) =>!n.isRead).length);
-      setNotifications([...notifs].reverse());
-      setProducts(prods);
-      setPendingRecharges(recharges.filter((r) => r.status === 'pending').length);
-    } catch (e) {
-      console.log('loadData error', e);
-    }
-  };
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const init = async () => {
       const cached = getCurrentUser();
       if (!cached) { navigate('/login'); return; }
-
-      // Show cached immediately - don't kick user out
       setUser(cached);
-      loadData(cached.id);
-
-      // Try to sync in background, but NEVER logout if it fails
-      try {
-        const fresh = await refreshCurrentUser();
-        if (fresh) {
-          setUser(fresh);
-          loadData(fresh.id);
-        }
-      } catch (e) {
-        console.log('Background sync failed, keeping cached user', e);
-      }
-
-      // Run daily income in background
-      try {
-        await processDailyIncome();
-        const latest = await getUserById(cached.id);
-        if (latest) setUser(latest);
-      } catch {}
+      const [fresh, notifs] = await Promise.all([
+        refreshCurrentUser(),
+        getUserNotifications(cached.id),
+      ]);
+      if (fresh) setUser(fresh);
+      setNotifications([...notifs].reverse());
+      setLoading(false);
     };
     init();
-
-    const shown = sessionStorage.getItem('notify_shown');
-    if (!shown) {
-      setShowNotify(true);
-      sessionStorage.setItem('notify_shown', '1');
-    }
   }, [navigate]);
 
-  const openBell = async () => {
-    const u = getCurrentUser();
-    if (!u) return;
-    const notifs = await getUserNotifications(u.id);
-    setNotifications([...notifs].reverse());
-    setUnreadCount(notifs.filter((n) =>!n.isRead).length);
-    setShowBell(true);
-  };
+  const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const handleMarkRead = async (id: string) => {
     await markNotificationRead(id);
-    setNotifications((prev) => prev.map((n) => n.id === id? {...n, isRead: true } : n));
-    setUnreadCount((c) => Math.max(0, c - 1));
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
   };
 
-  const handleMarkAllRead = async () => {
-    const u = getCurrentUser();
-    if (!u) return;
-    const notifs = await getUserNotifications(u.id);
-    await Promise.all(notifs.filter(n =>!n.isRead).map(n => markNotificationRead(n.id)));
-    setNotifications((prev) => prev.map((n) => ({...n, isRead: true })));
-    setUnreadCount(0);
+  const copyReferralCode = () => {
+    if (!user) return;
+    navigator.clipboard.writeText(user.referralCode);
+    toast.success('Referral code copied!');
   };
 
-  const refreshBalance = async () => {
-    const u = getCurrentUser();
-    if (!u) return;
-    try {
-      await processDailyIncome();
-      const fresh = await getUserById(u.id);
-      if (fresh) setUser(fresh);
-      await loadData(u.id);
-      toast.success('Balance refreshed');
-    } catch {
-      toast.error('Refresh failed');
-    }
+  const getReferralLink = () => {
+    if (!user) return '';
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, '') || '';
+    return `${window.location.origin}${base}/register?ref=${user.referralCode}`;
   };
 
-  const getNotifIcon = (type: string) => {
-    switch (type) {
-      case 'package_approved': return <Package className="w-4 h-4 text-green-500" />;
-      case 'package_rejected': return <Package className="w-4 h-4 text-red-400" />;
-      case 'daily_income': return <DollarSign className="w-4 h-4 text-amber-500" />;
-      case 'withdrawal_approved': return <CreditCard className="w-4 h-4 text-blue-500" />;
-      case 'withdrawal_rejected': return <CreditCard className="w-4 h-4 text-red-400" />;
-      case 'referral_bonus': return <Gift className="w-4 h-4 text-purple-500" />;
-      default: return <Bell className="w-4 h-4 text-gray-400" />;
-    }
+  const copyReferralLink = () => {
+    navigator.clipboard.writeText(getReferralLink());
+    toast.success('Referral link copied!');
   };
 
-  const getNotifColor = (type: string) => {
-    switch (type) {
-      case 'package_approved': return 'bg-green-50';
-      case 'package_rejected': return 'bg-red-50';
-      case 'daily_income': return 'bg-amber-50';
-      case 'withdrawal_approved': return 'bg-blue-50';
-      case 'withdrawal_rejected': return 'bg-red-50';
-      case 'referral_bonus': return 'bg-purple-50';
-      default: return 'bg-gray-50';
-    }
-  };
-
-  const activeProducts = products.filter((p) => p.status === 'active');
+  if (!user) return null;
 
   return (
     <AppLayout>
-      {showNotify && <NotifyModal onClose={() => setShowNotify(false)} />}
-
-      <div className="relative">
-        <img src={heroBanner} alt="Samsung Earnings" className="w-full h-48 object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60" />
-        <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
+      {/* Header */}
+      <div className="px-4 pt-6 pb-4" style={{ background: 'linear-gradient(135deg, #0a0f2e, #1d4ed8)' }}>
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-white/80 text-xs">Samsung Earnings</div>
-            <div className="text-white font-bold text-base">{user?.name || 'Loading...'}</div>
+            <div className="text-white/70 text-sm">Welcome back,</div>
+            <div className="text-white font-bold text-lg">{user.name}</div>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={refreshBalance} className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-              <RefreshCw className="w-4 h-4 text-white" />
-            </button>
-            <button onClick={openBell} className="relative w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-              <Bell className="w-4 h-4 text-white" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 rounded-full text-white text-[9px] flex items-center justify-center font-bold">
-                  {unreadCount > 9? '9+' : unreadCount}
-                </span>
-              )}
-            </button>
+          <button
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="relative p-2 bg-white/10 rounded-full"
+          >
+            <Bell className="w-6 h-6 text-white" />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Balance Card */}
+        <div className="bg-white/10 rounded-2xl p-4 mb-3">
+          <div className="text-white/70 text-xs mb-1">Account Balance</div>
+          <div className="text-white font-black text-3xl">{formatUGX(user.balance)}</div>
+          <div className="flex gap-4 mt-2">
+            <div>
+              <div className="text-white/60 text-xs">Total Earnings</div>
+              <div className="text-white font-semibold text-sm">{formatUGX(user.totalEarnings)}</div>
+            </div>
+            <div>
+              <div className="text-white/60 text-xs">Withdrawn</div>
+              <div className="text-white font-semibold text-sm">{formatUGX(user.totalWithdrawal)}</div>
+            </div>
           </div>
         </div>
-        <div className="absolute bottom-3 left-4 text-white text-sm font-semibold">
-          🚀 Galaxy Z Fold6 VIP — Earn UGX 700,000/day
+
+        {/* Referral Banner */}
+        <div className="bg-amber-500/20 border border-amber-400/40 rounded-2xl px-4 py-3 flex items-center justify-between">
+          <div>
+            <div className="text-amber-200 text-xs">Your Referral Code</div>
+            <div className="text-amber-300 font-black text-xl tracking-widest">{user.referralCode}</div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={copyReferralCode}
+              className="bg-amber-400 text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1"
+            >
+              <Copy className="w-3 h-3" /> Code
+            </button>
+            <button
+              onClick={() => navigate('/team')}
+              className="bg-white/10 text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1"
+            >
+              <Users className="w-3 h-3" /> Team
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="mx-4 -mt-4 bg-white rounded-2xl shadow-sm p-4 z-10 relative">
+      {/* Frozen Banner */}
+      {user.frozen && (
+        <div className="mx-4 mt-3 bg-red-50 border border-red-300 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">🔒</span>
+            <span className="text-red-700 font-bold text-sm">Account Frozen</span>
+          </div>
+          <p className="text-red-600 text-xs">Your account is frozen. Withdrawals and purchases are disabled. Contact support to resolve this.</p>
+          <a
+            href="https://t.me/+adk1usHyKF4yYzQ0"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-block bg-red-500 text-white text-xs font-bold px-4 py-2 rounded-xl"
+          >
+            Contact Support
+          </a>
+        </div>
+      )}
+
+      {/* Notification Drawer */}
+      {showNotifications && (
+        <div className="mx-4 mt-3 bg-white rounded-2xl shadow overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span className="font-semibold text-gray-800">Notifications</span>
+            <button onClick={() => setShowNotifications(false)} className="text-blue-600 text-xs">Close</button>
+          </div>
+          {notifications.length === 0 ? (
+            <div className="py-8 text-center text-gray-400 text-sm">No notifications yet</div>
+          ) : (
+            <div className="max-h-64 overflow-y-auto">
+              {notifications.map(n => (
+                <button
+                  key={n.id}
+                  onClick={() => handleMarkRead(n.id)}
+                  className={`w-full px-4 py-3 border-b border-gray-50 text-left ${!n.isRead ? 'bg-blue-50' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-gray-800 text-sm font-medium">{n.title}</div>
+                      <div className="text-gray-500 text-xs mt-0.5">{n.message}</div>
+                      <div className="text-gray-300 text-xs mt-1">{formatDateTime(n.createdAt)}</div>
+                    </div>
+                    {!n.isRead && <span className="w-2 h-2 bg-blue-500 rounded-full mt-1.5 flex-shrink-0"></span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick Actions */}
+      <div className="mx-4 mt-3 bg-white rounded-2xl shadow p-4">
+        <h2 className="font-semibold text-gray-700 text-sm mb-3">Quick Actions</h2>
         <div className="grid grid-cols-4 gap-2">
           {[
-            { icon: '💰', label: 'Recharge', path: '/recharge' },
-            { icon: '💸', label: 'Withdraw', path: '/withdraw' },
-            { icon: '🎯', label: 'Missions', path: '/mission' },
-            { icon: '📅', label: 'Check-in', path: '/mine' },
-          ].map(({ icon, label, path }) => (
-            <button key={label} onClick={() => navigate(path)} className="flex flex-col items-center py-3 rounded-xl bg-gray-50 hover:bg-blue-50 transition-colors">
+            { icon: '💰', label: 'Recharge', path: '/recharge', color: 'bg-blue-50' },
+            { icon: '💸', label: 'Withdraw', path: '/withdraw', color: 'bg-green-50' },
+            { icon: '📦', label: 'Products', path: '/product', color: 'bg-purple-50' },
+            { icon: '📋', label: 'Records', path: '/records', color: 'bg-amber-50' },
+          ].map(({ icon, label, path, color }) => (
+            <button
+              key={label}
+              onClick={() => navigate(path)}
+              className={`${color} flex flex-col items-center py-3 rounded-xl`}
+            >
               <span className="text-2xl">{icon}</span>
-              <span className="text-xs text-gray-600 mt-1 font-medium">{label}</span>
+              <span className="text-xs text-gray-600 font-medium mt-1">{label}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {user && (
-        <div className="mx-4 mt-3 rounded-2xl overflow-hidden shadow-sm" style={{ background: 'linear-gradient(135deg, #0a0f2e 0%, #1d4ed8 60%, #7c3aed 100%)' }}>
-          <div className="px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-amber-300" />
-              </div>
-              <div>
-                <div className="text-white/70 text-[10px] uppercase tracking-widest">Your Referral Code</div>
-                <div className="text-amber-300 font-black text-lg tracking-widest leading-tight">{user.referralCode}</div>
-                <div className="text-blue-200 text-[10px] mt-0.5">Earn 30% on every invite</div>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 items-end">
-              <button
-                onClick={() => { navigator.clipboard.writeText(getReferralLink(user.referralCode)); toast.success('Referral link copied!'); }}
-                className="flex items-center gap-1.5 bg-amber-400 text-white text-xs font-bold px-3 py-1.5 rounded-xl active:scale-95 transition-transform"
-              >
-                <Copy className="w-3.5 h-3.5" /> Copy Link
-              </button>
-              <button onClick={() => navigate('/team')} className="flex items-center gap-1 bg-white/15 text-white text-xs font-semibold px-3 py-1.5 rounded-xl active:scale-95 transition-transform">
-                View Team <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* Stats Cards */}
       <div className="mx-4 mt-3 grid grid-cols-2 gap-3">
-        <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)' }}>
-          <div className="text-xs text-blue-200 mb-1">Account Balance</div>
-          <div className="text-xl font-bold">{user? formatUGX(user.balance) : '...'}</div>
+        <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl p-4 text-white">
+          <TrendingUp className="w-5 h-5 mb-1 opacity-80" />
+          <div className="text-white/80 text-xs">Daily Earnings</div>
+          <div className="font-bold text-lg">{formatUGX(user.dailyEarnings)}</div>
         </div>
-        <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #d97706 0%, #f59e0b 100%)' }}>
-          <div className="text-xs text-amber-200 mb-1">Cumulative Income</div>
-          <div className="text-xl font-bold">{user? formatUGX(user.totalEarnings) : '...'}</div>
-        </div>
-        <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}>
-          <div className="text-xs text-teal-200 mb-1">Total Withdrawn</div>
-          <div className="text-xl font-bold">{user? formatUGX(user.totalWithdrawal) : '...'}</div>
-        </div>
-        <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)' }}>
-          <div className="text-xs text-purple-200 mb-1">Referral Earnings</div>
-          <div className="text-xl font-bold">{user? formatUGX(user.referralEarnings) : '...'}</div>
+        <div className="bg-gradient-to-br from-green-500 to-green-700 rounded-2xl p-4 text-white">
+          <Gift className="w-5 h-5 mb-1 opacity-80" />
+          <div className="text-white/80 text-xs">Referral Earnings</div>
+          <div className="font-bold text-lg">{formatUGX(user.referralEarnings)}</div>
         </div>
       </div>
 
-      {user?.frozen && (
-        <div className="mx-4 mt-3 bg-red-50 border-2 border-red-400 rounded-2xl p-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0"><span className="text-xl">🔒</span></div>
-            <div className="flex-1">
-              <div className="text-red-700 font-bold text-sm">Account Frozen</div>
-              <p className="text-red-600 text-xs mt-1 leading-relaxed">Your account has been frozen by the administrator. Withdrawals and package purchases are currently disabled.</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full">❌ Withdrawals Blocked</span>
-                <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full">❌ Purchases Blocked</span>
-              </div>
-              <a href="https://t.me/+adk1usHyKF4yYzQ0" target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1.5 bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl">📞 Contact Support</a>
-            </div>
-          </div>
+      {/* Share Referral Link */}
+      <div className="mx-4 mt-3 bg-white rounded-2xl shadow p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold text-gray-700 text-sm">Invite & Earn</h2>
+          <span className="text-xs text-green-600 font-semibold">30% commission</span>
         </div>
-      )}
-
-      {pendingRecharges > 0 && (
-        <div className="mx-4 mt-3 bg-amber-50 border border-amber-300 rounded-2xl p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">⏳</span>
-              <div>
-                <div className="text-amber-700 font-semibold text-sm">Recharge Pending</div>
-                <div className="text-amber-600 text-xs mt-0.5">{pendingRecharges} recharge{pendingRecharges > 1? 's' : ''} awaiting admin approval</div>
-              </div>
-            </div>
-            <button onClick={() => navigate('/records')} className="bg-amber-500 text-white text-xs px-3 py-1.5 rounded-full font-semibold shrink-0">Track</button>
-          </div>
+        <p className="text-gray-500 text-xs mb-3">Share your link and earn commission from your team's daily income.</p>
+        <div className="bg-gray-50 rounded-xl px-3 py-2 text-xs text-gray-500 font-mono truncate mb-2">
+          {getReferralLink()}
         </div>
-      )}
-
-      {activeProducts.length > 0 && (
-        <div className="mx-4 mt-3 bg-green-50 border border-green-200 rounded-2xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-green-700 font-semibold text-sm">Active Investments</div>
-              <div className="text-green-600 text-xs mt-0.5">{activeProducts.length} package(s) earning daily</div>
-            </div>
-            <button onClick={() => navigate('/my-product')} className="bg-green-600 text-white text-xs px-3 py-1.5 rounded-full font-medium">View</button>
-          </div>
-        </div>
-      )}
-
-      <div className="mx-4 mt-3 bg-blue-50 rounded-xl py-2 px-4 overflow-hidden">
-        <div className="marquee-text text-blue-700 text-xs font-medium">
-          🔔 {recentActivity.join(' • ')} • UGX 7,000 Registration Bonus waiting for you!
-        </div>
-      </div>
-
-      <div className="mx-4 mt-3">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-gray-800 font-bold text-base">Samsung Packages</h3>
-          <button onClick={() => navigate('/product')} className="text-blue-600 text-sm font-medium">View All</button>
-        </div>
-        <div className="space-y-3">
-          {PACKAGES.slice(0, 4).map((pkg) => (
-            <div key={pkg.id} className="bg-white rounded-2xl overflow-hidden flex items-center shadow-sm">
-              <img src={pkg.image} alt={pkg.name} className="w-24 h-20 object-cover" />
-              <div className="flex-1 px-3 py-2">
-                <div className="text-gray-800 font-semibold text-sm">{pkg.name}</div>
-                <div className="text-blue-600 font-bold text-sm">{formatUGX(pkg.dailyIncome)}/day</div>
-                <div className="text-gray-400 text-xs">{pkg.duration} days • {formatUGX(pkg.price)}</div>
-              </div>
-              <button onClick={() => navigate('/product')} className="mr-3 bg-blue-600 text-white text-xs px-3 py-1.5 rounded-full font-medium">Buy</button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {showBell && (
-        <div className="fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,0.45)' }} onClick={() => setShowBell(false)}>
-          <div
-            ref={drawerRef}
-            className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-white rounded-b-3xl shadow-2xl"
-            style={{ maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}
-            onClick={(e) => e.stopPropagation()}
+        <div className="flex gap-2">
+          <button
+            onClick={copyReferralLink}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition"
           >
-            <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-gray-100" style={{ background: 'linear-gradient(135deg, #0a0f2e, #1d4ed8)' }}>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Bell className="w-5 h-5 text-white" />
-                  {unreadCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-[9px] flex items-center justify-center font-bold">{unreadCount}</span>}
-                </div>
-                <span className="text-white font-bold text-base">Notifications</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {unreadCount > 0 && (
-                  <button onClick={handleMarkAllRead} className="flex items-center gap-1 bg-white/20 text-white/90 text-xs px-3 py-1.5 rounded-full">
-                    <CheckCheck className="w-3.5 h-3.5" /> Mark all read
-                  </button>
-                )}
-                <button onClick={() => setShowBell(false)} className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
+            <Copy className="w-3.5 h-3.5" /> Copy Link
+          </button>
+          <button
+            onClick={() => {
+              const text = `Join Eagle Investment and earn daily income! Use my referral link: ${getReferralLink()}`;
+              window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+            }}
+            className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition"
+          >
+            <span>WhatsApp</span>
+          </button>
+          <button
+            onClick={() => {
+              const text = `Join Eagle Investment and earn daily income! Use my referral link: ${getReferralLink()}`;
+              window.open(`https://t.me/share/url?url=${encodeURIComponent(getReferralLink())}&text=${encodeURIComponent('Join Eagle Investment and earn daily income!')}`, '_blank');
+            }}
+            className="flex-1 bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition"
+          >
+            <span>Telegram</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Navigation to Mine */}
+      <div className="mx-4 mt-3 mb-4">
+        <button
+          onClick={() => navigate('/mine')}
+          className="w-full bg-white rounded-2xl shadow p-4 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-lg font-bold text-blue-700">
+              {user.name.charAt(0).toUpperCase()}
             </div>
-            <div className="overflow-y-auto flex-1 py-2">
-              {notifications.length === 0? (
-                <div className="py-16 text-center">
-                  <div className="text-5xl mb-3">🔔</div>
-                  <div className="text-gray-500 font-medium">No notifications yet</div>
-                </div>
-              ) : (
-                notifications.map((notif) => (
-                  <button key={notif.id} onClick={() => handleMarkRead(notif.id)} className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors border-b border-gray-50 last:border-0 ${notif.isRead? 'bg-white' : 'bg-blue-50/60'}`}>
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${getNotifColor(notif.type)}`}>{getNotifIcon(notif.type)}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-sm font-semibold truncate ${notif.isRead? 'text-gray-700' : 'text-gray-900'}`}>{notif.title}</span>
-                        {!notif.isRead && <span className="w-2 h-2 bg-blue-500 rounded-full shrink-0" />}
-                      </div>
-                      <p className={`text-xs mt-0.5 leading-relaxed ${notif.isRead? 'text-gray-400' : 'text-gray-600'}`}>{notif.message}</p>
-                      <span className="text-gray-300 text-[10px] mt-1 block">{formatDateTime(notif.createdAt)}</span>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-            <div className="py-3 flex justify-center border-t border-gray-100">
-              <div className="w-10 h-1 bg-gray-200 rounded-full" />
+            <div className="text-left">
+              <div className="font-semibold text-gray-800 text-sm">{user.name}</div>
+              <div className="text-gray-400 text-xs">{user.phone}</div>
             </div>
           </div>
-        </div>
-      )}
+          <Package className="w-5 h-5 text-gray-300" />
+        </button>
+      </div>
     </AppLayout>
   );
 };
