@@ -19,13 +19,11 @@ import Regulation from '@/pages/Regulation';
 import AdminDashboard from '@/pages/AdminDashboard';
 import AdminLogin from '@/pages/AdminLogin';
 import NotFound from '@/pages/NotFound';
-import MigrationBanner from '@/components/features/MigrationBanner';
 import FixIncomes from '@/pages/FixIncomes';
 
 const App = () => {
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
-      <MigrationBanner />
       <Toaster position="top-center" richColors />
       <Routes>
         <Route path="/" element={<Index />} />
