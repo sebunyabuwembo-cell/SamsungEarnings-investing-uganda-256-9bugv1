@@ -13,36 +13,36 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 30% 10%;
 
-    --primary: 262 83% 58%;
+    --primary: 215 90% 45%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 262 30% 93%;
-    --secondary-foreground: 262 30% 20%;
+    --secondary: 220 15% 93%;
+    --secondary-foreground: 220 30% 20%;
 
-    --muted: 262 15% 93%;
+    --muted: 220 15% 93%;
     --muted-foreground: 220 10% 50%;
 
-    --accent: 262 83% 58%;
+    --accent: 215 90% 45%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 262 15% 88%;
-    --input: 262 15% 88%;
-    --ring: 262 83% 58%;
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 215 90% 45%;
 
     --radius: 0.75rem;
 
     --brand-navy: 220 50% 12%;
-    --brand-blue: 262 83% 58%;
+    --brand-blue: 215 90% 45%;
     --brand-gold: 38 90% 55%;
     --brand-dark: 220 40% 8%;
   }
 }
 
 @layer base {
-    * {
+  * {
     @apply border-border;
   }
   body {
