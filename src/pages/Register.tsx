@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { createUser, getUserByPhone, getUserByReferralCode, setCurrentUser, addNotification } from '@/lib/storage';
-import { User } from '@/types';
+import { REGISTRATION_BONUS } from '@/constants/packages';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -11,52 +11,36 @@ const Register = () => {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [referralCode, setReferralCode] = useState('');
+  const [refCode, setRefCode] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const refFromUrl = searchParams.get('ref') || searchParams.get('code') || searchParams.get('r');
-
   useEffect(() => {
-    if (refFromUrl) {
-      setReferralCode(decodeURIComponent(refFromUrl).trim().toUpperCase());
-    }
-  }, [refFromUrl]);
+    const ref = searchParams.get('ref');
+    if (ref) setRefCode(ref);
+  }, [searchParams]);
 
-  const generateReferralCode = (phone: string) => {
-    return 'EAGLE' + phone.slice(-4) + Math.random().toString(36).substring(2, 5).toUpperCase();
+  const generateReferralCode = () => {
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
   };
 
   const handleRegister = async () => {
-    if (!name.trim() ||!phone.trim() ||!password.trim()) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
-    if (password!== confirmPassword) {
-      toast.error('Passwords do not match');
-      return;
-    }
-    if (password.length < 6) {
-      toast.error('Password must be at least 6 characters');
-      return;
-    }
-    if (!/^\d{10,15}$/.test(phone.replace(/\s/g, ''))) {
-      toast.error('Please enter a valid phone number');
-      return;
-    }
+    if (!name.trim()) { toast.error('Please enter your name'); return; }
+    if (!phone.trim()) { toast.error('Please enter your phone number'); return; }
+    if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    if (password !== confirmPassword) { toast.error('Passwords do not match'); return; }
 
     setLoading(true);
     try {
-      const cleanPhone = phone.trim();
-      const existing = await getUserByPhone(cleanPhone);
+      const existing = await getUserByPhone(phone.trim());
       if (existing) {
         toast.error('Phone number already registered');
         setLoading(false);
         return;
       }
 
-      let referredById: string | null = null;
-      if (referralCode.trim()) {
-        const referrer = await getUserByReferralCode(referralCode.trim());
+      let referredById: string | undefined;
+      if (refCode.trim()) {
+        const referrer = await getUserByReferralCode(refCode.trim().toUpperCase());
         if (referrer) {
           referredById = referrer.id;
         } else {
@@ -66,155 +50,135 @@ const Register = () => {
         }
       }
 
-      const newUser: User = {
-        id: crypto.randomUUID(),
+      const newUser = await createUser({
         name: name.trim(),
-        phone: cleanPhone,
+        phone: phone.trim(),
         password,
-        balance: 7000,
-        totalEarnings: 0,
-        dailyEarnings: 0,
-        referralEarnings: 0,
-        totalWithdrawal: 0,
-        referralCode: generateReferralCode(cleanPhone),
-        referredBy: referredById,
+        balance: REGISTRATION_BONUS,
+        total_earnings: 0,
+        daily_earnings: 0,
+        referral_earnings: 0,
+        total_withdrawal: 0,
+        referral_code: generateReferralCode(),
+        referred_by: referredById,
         frozen: false,
-        claimedMissions: [],
-        lastCheckIn: null,
-        registrationBonus: 7000,
-        createdAt: new Date().toISOString(),
-      };
-
-      await createUser(newUser);
-
-      await addNotification({
-        userId: newUser.id,
-        type: 'welcome',
-        title: 'Welcome to Eagle Investment!',
-        message: `Hello ${newUser.name}! Your account has been created. You received UGX 7,000 as a registration bonus. Start investing to earn daily income!`,
-        isRead: false,
+        claimed_missions: [],
+        registration_bonus: REGISTRATION_BONUS,
       });
 
-      setCurrentUser(newUser);
-      toast.success('Account created successfully!');
-      navigate('/home');
+      if (newUser) {
+        await addNotification(newUser.id, 'system', 'Welcome Bonus', `Welcome to Samsung Earnings! You have received UGX ${REGISTRATION_BONUS.toLocaleString()} registration bonus.`);
+        setCurrentUser(newUser);
+        toast.success(`Account created! Welcome bonus: UGX ${REGISTRATION_BONUS.toLocaleString()}`);
+        navigate('/home');
+      } else {
+        toast.error('Registration failed. Please try again.');
+      }
     } catch (err) {
-      console.error(err);
-      toast.error('Registration failed. Try again.');
+      console.error('Registration error:', err);
+      toast.error('Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-600 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-700 flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-md">
+        {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-blue-800 font-bold text-2xl">E</span>
+          <div className="w-20 h-20 bg-white rounded-full mx-auto flex items-center justify-center mb-3 shadow-lg">
+            <span className="text-blue-700 font-bold text-2xl">SE</span>
           </div>
-          <h1 className="text-white text-2xl font-bold">Eagle Investment</h1>
+          <h1 className="text-white text-2xl font-bold">Samsung Earnings</h1>
           <p className="text-blue-200 text-sm mt-1">Create your account</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl p-6">
-          <h2 className="text-gray-800 text-xl font-semibold mb-6 text-center">Register</h2>
+        {/* Form */}
+        <div className="bg-white rounded-2xl p-6 shadow-xl">
+          <h2 className="text-gray-800 text-xl font-semibold mb-5 text-center">Register</h2>
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+              <label className="block text-gray-600 text-sm font-medium mb-1">Full Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="Enter your full name"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+              <label className="block text-gray-600 text-sm font-medium mb-1">Phone Number</label>
               <input
                 type="tel"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
-                placeholder="e.g. 0700000000"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                placeholder="e.g. 0771234567"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-gray-600 text-sm font-medium mb-1">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Minimum 6 characters"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+              <label className="block text-gray-600 text-sm font-medium mb-1">Confirm Password</label>
               <input
                 type="password"
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter your password"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Referral Code {refFromUrl? <span className="text-green-600">✓ Auto-applied</span> : <span className="text-gray-400 font-normal">(optional)</span>}
+              <label className="block text-gray-600 text-sm font-medium mb-1">
+                Referral Code <span className="text-gray-400 font-normal">(optional)</span>
               </label>
               <input
                 type="text"
-                value={referralCode}
-                onChange={e => setReferralCode(e.target.value.toUpperCase())}
-                readOnly={!!refFromUrl}
+                value={refCode}
+                onChange={e => setRefCode(e.target.value)}
                 placeholder="Enter referral code"
-                className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 ${refFromUrl? 'bg-green-50 border-green-300 font-bold' : 'border-gray-300'}`}
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm uppercase"
               />
             </div>
-
-            {referralCode && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <p className="text-green-700 text-sm">🎉 Referral code applied! You'll get UGX 7,000 bonus.</p>
-              </div>
-            )}
-
-            <button
-              onClick={handleRegister}
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold py-3 rounded-lg transition-colors mt-2"
-            >
-              {loading? 'Creating account...' : 'Create Account'}
-            </button>
           </div>
 
-          <div className="mt-6 text-center">
-            <p className="text-gray-600 text-sm">
-              Already have an account?{' '}
-              <Link to="/login" className="text-blue-600 font-semibold hover:underline">
-                Sign In
-              </Link>
+          {/* Bonus banner */}
+          <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+            <p className="text-green-700 text-sm font-medium">
+              🎁 Get UGX {REGISTRATION_BONUS.toLocaleString()} welcome bonus on registration!
             </p>
           </div>
+
+          <button
+            onClick={handleRegister}
+            disabled={loading}
+            className="mt-5 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+          >
+            {loading ? 'Creating Account...' : 'Create Account'}
+          </button>
+
+          <p className="text-center text-gray-500 text-sm mt-4">
+            Already have an account?{' '}
+            <Link to="/login" className="text-blue-600 font-medium hover:underline">
+              Login
+            </Link>
+          </p>
         </div>
-
-        <p className="text-center text-blue-200 text-xs mt-6">
-          By registering, you agree to our Terms & Conditions
-        </p>
-
-        {/* SECRET ADMIN FLOWER 🌺 */}
-        <div className="flex justify-center mt-6">
-          <Link to="/admin" className="opacity-40 hover:opacity-100 transition-opacity p-2">
-            <span className="text-2xl">🌺</span>
-          </Link>
-        </div>
-
       </div>
     </div>
   );
