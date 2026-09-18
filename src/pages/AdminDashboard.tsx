@@ -1,212 +1,926 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  getAdminSession, setAdminSession,
-  getUsers, getUserById, updateUser, deleteUserById,
-  getProducts, updateProduct,
-  getRecharges, updateRecharge,
-  getWithdrawals, updateWithdrawal,
-  getNotifications, addNotification,
-  getRedeemCodes, createRedeemCode, deleteRedeemCodeById,
+  getUsers,
+  getProducts,
+  getRecharges,
+  getWithdrawals,
+  getNotifications,
+  getRedeemCodes,
+  updateUser,
+  updateRecharge,
+  updateWithdrawal,
+  deleteUserById,
+  createRedeemCode,
+  updateRedeemCode,
+  deleteRedeemCodeById,
+  addNotification,
+  getAdminSession,
+  setAdminSession,
   runDailyIncomeWithStats,
+  getUserProducts,
 } from '@/lib/storage';
-import { User, Product, Recharge, Withdrawal, Notification, RedeemCode } from '@/types';
-import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
-} from 'recharts';
-
-type Tab = 'overview' | 'users' | 'products' | 'recharges' | 'withdrawals' | 'notifications' | 'redeem' | 'analytics';
-const fmt = (n: number) => `UGX ${Number(n).toLocaleString()}`;
+import type { User, UserProduct, Recharge, Withdrawal, RedeemCode, Notification } from '@/types';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<'overview' | 'users' | 'packages' | 'recharges' | 'withdrawals' | 'analytics' | 'redeems'>('overview');
+
+  // Data states
   const [users, setUsers] = useState<User[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<UserProduct[]>([]);
   const [recharges, setRecharges] = useState<Recharge[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Users tab state
   const [userSearch, setUserSearch] = useState('');
   const [userFilter, setUserFilter] = useState<'all' | 'frozen' | 'active'>('all');
-  const [expandedUser, setExpandedUser] = useState<string | null>(null);
-  const [adjustModalUser, setAdjustModalUser] = useState<User | null>(null);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [adjustModal, setAdjustModal] = useState<{ user: User } | null>(null);
   const [adjustAmount, setAdjustAmount] = useState('');
+  const [adjustNote, setAdjustNote] = useState('');
   const [adjustType, setAdjustType] = useState<'add' | 'deduct'>('add');
-  const [adjustReason, setAdjustReason] = useState('');
-  const [newRedeemCode, setNewRedeemCode] = useState('');
-  const [newRedeemAmount, setNewRedeemAmount] = useState('');
-  const [newRedeemExpiry, setNewRedeemExpiry] = useState('');
-  const [referralTrees, setReferralTrees] = useState<Record<string, { l1: User[]; l2: User[]; l3: User[] }>>({});
+  const [referralTreeData, setReferralTreeData] = useState<Record<string, { l1: User[]; l2: Record<string, User[]>; l3: Record<string, User[]> }>>({});
 
-  const pendingRecharges = recharges.filter(r => r.status === 'pending');
+  // Redeems tab state
+  const [newCode, setNewCode] = useState('');
+  const [newCodeAmount, setNewCodeAmount] = useState('');
+  const [newCodeExpiry, setNewCodeExpiry] = useState('');
+
+  // Daily income state
+  const [runningIncome, setRunningIncome] = useState(false);
+
+  // Pending recharge count for badge
+  const pendingRechargeCount = recharges.filter(r => r.status === 'pending').length;
+  const pendingWithdrawalCount = withdrawals.filter(w => w.status === 'pending').length;
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [u, p, r, w, n, rc] = await Promise.all([
+        getUsers(), getProducts(), getRecharges(), getWithdrawals(), getNotifications(), getRedeemCodes(),
+      ]);
+      setUsers(u);
+      setProducts(p);
+      setRecharges(r);
+      setWithdrawals(w);
+      setNotifications(n);
+      setRedeemCodes(rc);
+    } catch (err) {
+      console.error('Load error:', err);
+      toast.error('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!getAdminSession()) { navigate('/admin'); return; }
     loadAll();
-  }, []);
+  }, [navigate, loadAll]);
 
-  // FIXED loadAll - never hangs
-  const loadAll = async () => {
-    setLoading(true);
-    try {
-      const results = await Promise.allSettled([
-        getUsers(), getProducts(), getRecharges(),
-        getWithdrawals(), getNotifications(), getRedeemCodes(),
-      ]);
-      setUsers(results[0].status === 'fulfilled'? (results[0].value as User[]) : []);
-      setProducts(results[1].status === 'fulfilled'? (results[1].value as Product[]) : []);
-      setRecharges(results[2].status === 'fulfilled'? (results[2].value as Recharge[]) : []);
-      setWithdrawals(results[3].status === 'fulfilled'? (results[3].value as Withdrawal[]) : []);
-      setNotifications(results[4].status === 'fulfilled'? (results[4].value as Notification[]) : []);
-      setRedeemCodes(results[5].status === 'fulfilled'? (results[5].value as RedeemCode[]) : []);
-
-      const failed = results.filter(r => r.status === 'rejected').length;
-      if (failed > 0) console.warn(`${failed} admin queries failed - check Supabase`);
-    } catch (e) {
-      console.error("Admin load error", e);
-      toast.error("Failed to load - check internet / Supabase keys");
-    } finally {
-      setLoading(false); // ALWAYS stops spinner
-    }
-  };
-
-  const handleLogout = () => { setAdminSession(false); navigate('/admin'); };
+  // ── Referral tree loader ──────────────────────────────────────────────────
 
   const loadReferralTree = async (userId: string) => {
-    if (referralTrees[userId]) return;
+    if (referralTreeData[userId]) return;
     const l1 = users.filter(u => u.referredBy === userId);
-    const l2: User[] = [];
-    const l3: User[] = [];
-    for (const l1User of l1) {
-      const l2Users = users.filter(u => u.referredBy === l1User.id);
-      l2.push(...l2Users);
-      for (const l2User of l2Users) l3.push(...users.filter(u => u.referredBy === l2User.id));
+    const l2Map: Record<string, User[]> = {};
+    const l3Map: Record<string, User[]> = {};
+    for (const l1u of l1) {
+      const l2 = users.filter(u => u.referredBy === l1u.id);
+      l2Map[l1u.id] = l2;
+      for (const l2u of l2) {
+        l3Map[l2u.id] = users.filter(u => u.referredBy === l2u.id);
+      }
     }
-    setReferralTrees(prev => ({...prev, [userId]: { l1, l2, l3 } }));
+    setReferralTreeData(prev => ({ ...prev, [userId]: { l1, l2: l2Map, l3: l3Map } }));
   };
 
-  const toggleExpandUser = async (userId: string) => {
-    if (expandedUser === userId) setExpandedUser(null);
-    else { setExpandedUser(userId); await loadReferralTree(userId); }
+  // ── Daily Income ──────────────────────────────────────────────────────────
+
+  const handleRunDailyIncome = async () => {
+    setRunningIncome(true);
+    try {
+      const { processed, totalPaid } = await runDailyIncomeWithStats();
+      toast.success(`Daily income processed: ${processed} packages, UGX ${totalPaid.toLocaleString()} paid`);
+      loadAll();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to run daily income');
+    } finally {
+      setRunningIncome(false);
+    }
+  };
+
+  // ── Users ─────────────────────────────────────────────────────────────────
+
+  const filteredUsers = users.filter(u => {
+    const matchSearch = !userSearch ||
+      u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+      u.phone.includes(userSearch);
+    const matchFilter = userFilter === 'all' ||
+      (userFilter === 'frozen' && u.frozen) ||
+      (userFilter === 'active' && !u.frozen);
+    return matchSearch && matchFilter;
+  });
+
+  const handleFreezeToggle = async (user: User) => {
+    await updateUser(user.id, { frozen: !user.frozen });
+    toast.success(`Account ${user.frozen ? 'unfrozen' : 'frozen'}`);
+    await addNotification({
+      userId: user.id,
+      type: 'system',
+      title: user.frozen ? 'Account Unfrozen' : 'Account Frozen',
+      message: user.frozen
+        ? 'Your account has been unfrozen. You can now make purchases and withdrawals.'
+        : 'Your account has been frozen. Contact support for assistance.',
+      isRead: false,
+    });
+    loadAll();
+  };
+
+  const handleDeleteUser = async (user: User) => {
+    if (!confirm(`Delete user ${user.name} (${user.phone})? This cannot be undone.`)) return;
+    await deleteUserById(user.id);
+    toast.success('User deleted');
+    loadAll();
   };
 
   const handleAdjustBalance = async () => {
-    if (!adjustModalUser ||!adjustAmount) return;
-    const amt = parseFloat(adjustAmount);
-    if (isNaN(amt) || amt <= 0) { toast.error('Enter valid amount'); return; }
-    const newBalance = Math.max(0, adjustModalUser.balance + (adjustType === 'add'? amt : -amt));
-    await updateUser(adjustModalUser.id, { balance: newBalance });
-    await addNotification({ userId: adjustModalUser.id, type: 'income', title: adjustType === 'add'? 'Balance Added' : 'Balance Deducted', message: `Admin ${adjustType} ${fmt(amt)} ${adjustReason}`, isRead: false } as any);
-    toast.success('Balance updated'); setAdjustModalUser(null); setAdjustAmount(''); setAdjustReason(''); await loadAll();
+    if (!adjustModal) return;
+    const amount = parseFloat(adjustAmount);
+    if (isNaN(amount) || amount <= 0) { toast.error('Enter a valid amount'); return; }
+    const user = adjustModal.user;
+    const newBalance = adjustType === 'add'
+      ? user.balance + amount
+      : Math.max(0, user.balance - amount);
+    await updateUser(user.id, { balance: newBalance });
+    await addNotification({
+      userId: user.id,
+      type: 'system',
+      title: adjustType === 'add' ? 'Balance Added' : 'Balance Deducted',
+      message: `Admin ${adjustType === 'add' ? 'added' : 'deducted'} UGX ${amount.toLocaleString()} ${adjustType === 'add' ? 'to' : 'from'} your balance. Note: ${adjustNote || 'N/A'}`,
+      isRead: false,
+    });
+    toast.success(`Balance ${adjustType === 'add' ? 'added' : 'deducted'}: UGX ${amount.toLocaleString()}`);
+    setAdjustModal(null);
+    setAdjustAmount('');
+    setAdjustNote('');
+    loadAll();
   };
 
-  const handleToggleFreeze = async (user: User) => { await updateUser(user.id, { frozen:!user.frozen }); toast.success(user.frozen? 'Unfrozen' : 'Frozen'); await loadAll(); };
-  const handleDeleteUser = async (user: User) => { if (!confirm(`Delete ${user.name}?`)) return; await deleteUserById(user.id); toast.success('Deleted'); await loadAll(); };
+  const exportCSV = () => {
+    const header = ['Name', 'Phone', 'Balance', 'Total Earnings', 'Referral Earnings', 'Total Withdrawals', 'Referral Code', 'Frozen', 'Joined'];
+    const rows = users.map(u => [
+      u.name, u.phone, u.balance, u.totalEarnings, u.referralEarnings,
+      u.totalWithdrawal, u.referralCode, u.frozen ? 'Yes' : 'No',
+      new Date(u.createdAt).toLocaleDateString(),
+    ]);
+    const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'users.csv'; a.click();
+    URL.revokeObjectURL(url);
+    toast.success('CSV exported');
+  };
 
-  const handleRechargeApprove = async (r: Recharge) => {
+  // ── Recharges ─────────────────────────────────────────────────────────────
+
+  const handleApproveRecharge = async (r: Recharge) => {
+    const user = users.find(u => u.id === r.userId);
+    if (!user) { toast.error('User not found'); return; }
     await updateRecharge(r.id, { status: 'approved', processedAt: new Date().toISOString() });
-    const user = await getUserById(r.userId);
-    if (user) { await updateUser(r.userId, { balance: user.balance + r.amount }); await addNotification({ userId: r.userId, type: 'income', title: 'Recharge Approved', message: `Your ${fmt(r.amount)} approved`, isRead: false } as any); }
-    toast.success('Approved'); await loadAll();
+    await updateUser(user.id, { balance: user.balance + r.amount });
+    await addNotification({
+      userId: user.id,
+      type: 'recharge',
+      title: 'Recharge Approved',
+      message: `Your recharge of UGX ${r.amount.toLocaleString()} has been approved and added to your balance.`,
+      isRead: false,
+    });
+    toast.success(`Recharge approved: UGX ${r.amount.toLocaleString()}`);
+    loadAll();
   };
-  const handleRechargeReject = async (r: Recharge) => { await updateRecharge(r.id, { status: 'rejected', processedAt: new Date().toISOString() }); toast.success('Rejected'); await loadAll(); };
 
-  const handleWithdrawalApprove = async (w: Withdrawal) => { await updateWithdrawal(w.id, { status: 'approved', processedAt: new Date().toISOString() }); toast.success('Approved'); await loadAll(); };
-  const handleWithdrawalReject = async (w: Withdrawal) => {
-    const user = await getUserById(w.userId);
-    if (user) await updateUser(w.userId, { balance: user.balance + w.amount });
-    await updateWithdrawal(w.id, { status: 'rejected', processedAt: new Date().toISOString() }); toast.success('Rejected & refunded'); await loadAll();
+  const handleRejectRecharge = async (r: Recharge) => {
+    await updateRecharge(r.id, { status: 'rejected', processedAt: new Date().toISOString() });
+    await addNotification({
+      userId: r.userId,
+      type: 'recharge',
+      title: 'Recharge Rejected',
+      message: `Your recharge of UGX ${r.amount.toLocaleString()} has been rejected. Contact support for assistance.`,
+      isRead: false,
+    });
+    toast.success('Recharge rejected');
+    loadAll();
   };
 
-  const handleProductApprove = async (p: Product) => {
-    const now = new Date(); const expiry = new Date(now); expiry.setDate(expiry.getDate() + p.duration);
-    await updateProduct(p.id, { status: 'active', buyDate: now.toISOString(), expiryDate: expiry.toISOString() } as any);
-    await addNotification({ userId: p.userId, type: 'income', title: 'Package Activated', message: `${p.packageName} activated`, isRead: false } as any);
-    toast.success('Activated'); await loadAll();
+  // ── Withdrawals ───────────────────────────────────────────────────────────
+
+  const handleApproveWithdrawal = async (w: Withdrawal) => {
+    await updateWithdrawal(w.id, { status: 'approved', processedAt: new Date().toISOString() });
+    await addNotification({
+      userId: w.userId,
+      type: 'withdrawal',
+      title: 'Withdrawal Approved',
+      message: `Your withdrawal of UGX ${w.netAmount.toLocaleString()} has been approved and sent to ${w.walletType.toUpperCase()} ${w.walletPhone}.`,
+      isRead: false,
+    });
+    toast.success('Withdrawal approved');
+    loadAll();
   };
-  const handleProductReject = async (p: Product) => {
-    const user = await getUserById(p.userId);
-    if (user) await updateUser(p.userId, { balance: user.balance + p.packagePrice });
-    await updateProduct(p.id, { status: 'expired' } as any); toast.success('Rejected & refunded'); await loadAll();
+
+  const handleRejectWithdrawal = async (w: Withdrawal) => {
+    const user = users.find(u => u.id === w.userId);
+    if (user) {
+      await updateUser(user.id, {
+        balance: user.balance + w.amount,
+        totalWithdrawal: Math.max(0, user.totalWithdrawal - w.amount),
+      });
+    }
+    await updateWithdrawal(w.id, { status: 'rejected', processedAt: new Date().toISOString() });
+    await addNotification({
+      userId: w.userId,
+      type: 'withdrawal',
+      title: 'Withdrawal Rejected',
+      message: `Your withdrawal request of UGX ${w.amount.toLocaleString()} has been rejected. The amount has been refunded to your balance.`,
+      isRead: false,
+    });
+    toast.success('Withdrawal rejected — balance refunded');
+    loadAll();
   };
+
+  // ── Redeem Codes ──────────────────────────────────────────────────────────
 
   const handleCreateRedeemCode = async () => {
-    if (!newRedeemCode.trim() ||!newRedeemAmount ||!newRedeemExpiry) { toast.error('Fill all'); return; }
-    const code: RedeemCode = { id: crypto.randomUUID(), code: newRedeemCode.trim().toUpperCase(), amount: parseFloat(newRedeemAmount), expiresAt: new Date(newRedeemExpiry).toISOString(), usedBy: [], isActive: true, createdAt: new Date().toISOString() } as any;
-    await createRedeemCode(code); toast.success('Created'); setNewRedeemCode(''); setNewRedeemAmount(''); setNewRedeemExpiry(''); await loadAll();
+    if (!newCode.trim()) { toast.error('Enter a code'); return; }
+    if (!newCodeAmount || isNaN(Number(newCodeAmount))) { toast.error('Enter valid amount'); return; }
+    if (!newCodeExpiry) { toast.error('Set expiry date'); return; }
+    await createRedeemCode({
+      id: crypto.randomUUID(),
+      code: newCode.toUpperCase(),
+      amount: Number(newCodeAmount),
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(newCodeExpiry).toISOString(),
+      usedBy: [],
+      isActive: true,
+    });
+    toast.success('Redeem code created');
+    setNewCode(''); setNewCodeAmount(''); setNewCodeExpiry('');
+    loadAll();
   };
-  const handleDeleteRedeemCode = async (id: string) => { await deleteRedeemCodeById(id); toast.success('Deleted'); await loadAll(); };
-  const handleExportCSV = () => {
-    const headers = ['Name','Phone','Balance','Earnings','Frozen','Joined'];
-    const rows = users.map(u => [u.name,u.phone,u.balance,u.totalEarnings,u.frozen?'Yes':'No',new Date(u.createdAt).toLocaleDateString()]);
-    const csv = [headers,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='users.csv'; a.click(); URL.revokeObjectURL(url);
+
+  const handleDeactivateCode = async (code: RedeemCode) => {
+    await updateRedeemCode({ ...code, isActive: false });
+    toast.success('Code deactivated');
+    loadAll();
   };
-  const handleRunDailyIncome = async () => { toast.info('Running...'); const {processed,totalPaid}=await runDailyIncomeWithStats(); toast.success(`${processed} processed, ${fmt(totalPaid)} paid`); await loadAll(); };
 
-  const revenueData = (()=>{const m:Record<string,number>={}; recharges.filter(r=>r.status==='approved').forEach(r=>{const d=new Date(r.createdAt).toLocaleDateString(); m[d]=(m[d]||0)+r.amount;}); return Object.entries(m).slice(-7).map(([date,amount])=>({date,amount}));})();
-  const userGrowthData = (()=>{const m:Record<string,number>={}; users.forEach(u=>{const d=new Date(u.createdAt).toLocaleDateString(); m[d]=(m[d]||0)+1;}); return Object.entries(m).slice(-7).map(([date,count])=>({date,count}));})();
-  const packageDistData = (()=>{const m:Record<string,number>={}; products.forEach(p=>{m[p.packageName]=(m[p.packageName]||0)+1;}); return Object.entries(m).map(([name,value])=>({name,value}));})();
-  const PIE_COLORS=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
-  const filteredUsers = users.filter(u=>{const s=u.name.toLowerCase().includes(userSearch.toLowerCase())||u.phone.includes(userSearch); const f=userFilter==='all'?true:userFilter==='frozen'?u.frozen:!u.frozen; return s&&f;});
-  const TABS: {key: any; label: string}[] = [{key:'overview',label:'Overview'},{key:'users',label:'Users'},{key:'products',label:'Packages'},{key:'recharges',label:'Recharges'},{key:'withdrawals',label:'Withdrawals'},{key:'notifications',label:'Notifications'},{key:'redeem',label:'Redeem Codes'},{key:'analytics',label:'Analytics'}];
+  const handleDeleteCode = async (id: string) => {
+    await deleteRedeemCodeById(id);
+    toast.success('Code deleted');
+    loadAll();
+  };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading admin dashboard...</p>
-          <button onClick={()=>setLoading(false)} className="mt-4 text-xs bg-white px-4 py-2 rounded-full shadow text-blue-600">Stuck? Click to open dashboard</button>
-          <button onClick={()=>{localStorage.clear(); window.location.href='/admin';}} className="mt-2 block mx-auto text-xs text-gray-400">Clear cache & re-login</button>
-        </div>
-      </div>
-    );
-  }
+  // ── Analytics data ────────────────────────────────────────────────────────
+
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i));
+    return d.toISOString().split('T')[0];
+  });
+
+  const rechargeChartData = last7Days.map(day => ({
+    day: day.slice(5),
+    amount: recharges
+      .filter(r => r.status === 'approved' && r.createdAt?.startsWith(day))
+      .reduce((s, r) => s + r.amount, 0),
+  }));
+
+  const userGrowthData = last7Days.map(day => ({
+    day: day.slice(5),
+    users: users.filter(u => u.createdAt?.startsWith(day)).length,
+  }));
+
+  const totalRevenue = recharges.filter(r => r.status === 'approved').reduce((s, r) => s + r.amount, 0);
+  const totalWithdrawn = withdrawals.filter(w => w.status === 'approved').reduce((s, w) => s + w.netAmount, 0);
+  const activePackages = products.filter(p => p.status === 'active').length;
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'users', label: `Users (${users.length})` },
+    { id: 'packages', label: `Packages (${products.length})` },
+    { id: 'recharges', label: `Recharges`, badge: pendingRechargeCount },
+    { id: 'withdrawals', label: `Withdrawals`, badge: pendingWithdrawalCount },
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'redeems', label: 'Redeem Codes' },
+  ] as const;
+
+  const handleLogout = () => {
+    setAdminSession(false);
+    navigate('/admin');
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-900 text-white px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3"><div className="w-9 h-9 bg-blue-400 rounded-full flex items-center justify-center">🌸</div><div><h1 className="font-bold">Admin Panel</h1><p className="text-blue-200 text-xs">Engle Investment Uganda</p></div></div>
-        <button onClick={handleLogout} className="bg-blue-700 px-4 py-1.5 rounded-lg text-sm">Logout</button>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-blue-800 text-white px-4 py-4 flex items-center justify-between sticky top-0 z-30">
+        <div>
+          <h1 className="text-lg font-bold">Admin Dashboard</h1>
+          <p className="text-blue-200 text-xs">Samsung Earnings Platform</p>
+        </div>
+        <button onClick={handleLogout} className="text-blue-200 text-sm hover:text-white transition-colors">
+          Logout
+        </button>
       </div>
-      {pendingRecharges.length>0 && <div onClick={()=>setTab('recharges')} className="bg-yellow-400 text-yellow-900 px-4 py-2 text-sm font-semibold text-center cursor-pointer">⚠️ {pendingRecharges.length} pending recharge — Click to review</div>}
-      <div className="bg-white border-b overflow-x-auto flex">{TABS.map(t=>(<button key={t.key} onClick={()=>setTab(t.key)} className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 ${tab===t.key?'border-blue-600 text-blue-600':'border-transparent text-gray-500'}`}>{t.label}{t.key==='recharges'&&pendingRecharges.length>0&&<span className="ml-1 bg-red-500 text-white text-xs rounded-full px-1.5">{pendingRecharges.length}</span>}</button>))}</div>
-      <div className="p-4 max-w-7xl mx-auto">
-        {tab==='overview' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[{label:'Total Users',value:users.length,color:'bg-blue-500'},{label:'Active Packages',value:products.filter(p=>p.status==='active').length,color:'bg-green-500'},{label:'Pending Recharges',value:pendingRecharges.length,color:'bg-yellow-500'},{label:'Pending Withdrawals',value:withdrawals.filter(w=>w.status==='pending').length,color:'bg-red-500'}].map(c=>(<div key={c.label} className={`${c.color} text-white rounded-xl p-4`}><div className="text-2xl font-bold">{c.value}</div><div className="text-sm">{c.label}</div></div>))}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl p-4 shadow"><div className="text-gray-500 text-sm">Total Revenue</div><div className="text-xl font-bold text-green-600">{fmt(recharges.filter(r=>r.status==='approved').reduce((s,r)=>s+r.amount,0))}</div></div>
-              <div className="bg-white rounded-xl p-4 shadow"><div className="text-gray-500 text-sm">Total Withdrawals</div><div className="text-xl font-bold text-red-500">{fmt(withdrawals.filter(w=>w.status==='approved').reduce((s,w)=>s+w.netAmount,0))}</div></div>
-              <div className="bg-white rounded-xl p-4 shadow"><div className="text-gray-500 text-sm">Daily Income Paid</div><div className="text-xl font-bold text-blue-600">{fmt(products.reduce((s,p)=>s+p.totalIncomeEarned,0))}</div></div>
-            </div>
-            <div className="bg-white rounded-xl p-4 shadow"><h3 className="font-semibold mb-3">Manual Daily Income</h3><button onClick={handleRunDailyIncome} className="bg-blue-600 text-white px-6 py-2 rounded-lg">▶ Run Daily Income Now</button></div>
+
+      {/* Tab bar */}
+      <div className="bg-white border-b border-gray-200 px-2 sticky top-[68px] z-20 overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`relative px-3 py-3 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
+                tab === t.id
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {t.label}
+              {'badge' in t && t.badge > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-4 py-4 pb-8">
+        {loading && (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
           </div>
         )}
-        {tab==='users' && (
-          <div className="space-y-4">
-            <div className="flex gap-2"><input value={userSearch} onChange={e=>setUserSearch(e.target.value)} placeholder="Search..." className="flex-1 border rounded-lg px-3 py-2 text-sm"/><select value={userFilter} onChange={e=>setUserFilter(e.target.value as any)} className="border rounded-lg px-3 py-2 text-sm"><option value="all">All</option><option value="active">Active</option><option value="frozen">Frozen</option></select><button onClick={handleExportCSV} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm">CSV</button></div>
-            {filteredUsers.map(user=>(
-              <div key={user.id} className={`bg-white rounded-xl shadow p-4 ${user.frozen?'border-l-4 border-red-400':''}`}>
-                <div className="flex justify-between"><div><div className="font-semibold">{user.name} {user.frozen&&<span className="bg-red-100 text-red-600 text-xs px-2 rounded-full">Frozen</span>}</div><div className="text-sm text-gray-500">{user.phone}</div><div className="text-sm">Bal: <span className="font-semibold text-blue-600">{fmt(user.balance)}</span> · Earn: <span className="font-semibold text-green-600">{fmt(user.totalEarnings)}</span></div></div><div className="flex flex-col gap-1"><button onClick={()=>setAdjustModalUser(user)} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">Adjust</button><button onClick={()=>handleToggleFreeze(user)} className="text-xs bg-yellow-50 px-2 py-1 rounded">{user.frozen?'Unfreeze':'Freeze'}</button><button onClick={()=>handleDeleteUser(user)} className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded">Delete</button><button onClick={()=>toggleExpandUser(user.id)} className="text-xs bg-gray-50 px-2 py-1 rounded">{expandedUser===user.id?'Hide':'Tree'}</button></div></div>
+
+        {!loading && (
+          <>
+            {/* ── OVERVIEW ─────────────────────────────────────────────── */}
+            {tab === 'overview' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Total Users', value: users.length, color: 'text-blue-600' },
+                    { label: 'Active Packages', value: activePackages, color: 'text-green-600' },
+                    { label: 'Total Revenue', value: `UGX ${totalRevenue.toLocaleString()}`, color: 'text-purple-600' },
+                    { label: 'Total Withdrawn', value: `UGX ${totalWithdrawn.toLocaleString()}`, color: 'text-orange-600' },
+                    { label: 'Pending Recharges', value: pendingRechargeCount, color: 'text-yellow-600' },
+                    { label: 'Pending Withdrawals', value: pendingWithdrawalCount, color: 'text-red-600' },
+                  ].map(stat => (
+                    <div key={stat.label} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                      <p className="text-xs text-gray-400">{stat.label}</p>
+                      <p className={`text-lg font-bold mt-1 ${stat.color}`}>{stat.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={handleRunDailyIncome}
+                  disabled={runningIncome}
+                  className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-semibold rounded-xl transition-colors"
+                >
+                  {runningIncome ? '⏳ Processing...' : '▶ Run Daily Income'}
+                </button>
+
+                {/* Recent notifications */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                  <h3 className="font-semibold text-gray-800 mb-3">Recent Activity</h3>
+                  {notifications.slice(0, 8).map(n => (
+                    <div key={n.id} className="flex items-start gap-2 py-2 border-b border-gray-50 last:border-0">
+                      <span className="text-sm mt-0.5">
+                        {n.type === 'recharge' ? '💳' : n.type === 'withdrawal' ? '💸' : n.type === 'income' ? '💰' : '🔔'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-gray-700 truncate">{n.title}</p>
+                        <p className="text-xs text-gray-400 truncate">{n.message}</p>
+                      </div>
+                      <span className="text-xs text-gray-300 whitespace-nowrap">
+                        {new Date(n.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
+                  {notifications.length === 0 && <p className="text-gray-400 text-sm text-center py-4">No activity yet</p>}
+                </div>
               </div>
-            ))}
-          </div>
+            )}
+
+            {/* ── USERS ─────────────────────────────────────────────────── */}
+            {tab === 'users' && (
+              <div className="space-y-3">
+                {/* Search & filter */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={userSearch}
+                    onChange={e => setUserSearch(e.target.value)}
+                    placeholder="Search name or phone..."
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    value={userFilter}
+                    onChange={e => setUserFilter(e.target.value as any)}
+                    className="border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none"
+                  >
+                    <option value="all">All</option>
+                    <option value="active">Active</option>
+                    <option value="frozen">Frozen</option>
+                  </select>
+                </div>
+
+                <button onClick={exportCSV} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors">
+                  📥 Export CSV
+                </button>
+
+                <p className="text-xs text-gray-400">{filteredUsers.length} users found</p>
+
+                {filteredUsers.map(user => {
+                  const userPkgs = products.filter(p => p.userId === user.id);
+                  const isExpanded = expandedUserId === user.id;
+                  const tree = referralTreeData[user.id];
+
+                  return (
+                    <div key={user.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                      <div className="p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-gray-800 text-sm">{user.name}</p>
+                              {user.frozen && (
+                                <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">Frozen</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-400">{user.phone}</p>
+                            <p className="text-xs text-gray-400">Code: {user.referralCode}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-green-600">UGX {user.balance.toLocaleString()}</p>
+                            <p className="text-xs text-gray-400">Pkgs: {userPkgs.length}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1 mb-3 text-xs">
+                          <div className="bg-gray-50 rounded p-1.5 text-center">
+                            <p className="text-gray-400">Earned</p>
+                            <p className="font-medium">{user.totalEarnings.toLocaleString()}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded p-1.5 text-center">
+                            <p className="text-gray-400">Referral</p>
+                            <p className="font-medium">{user.referralEarnings.toLocaleString()}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded p-1.5 text-center">
+                            <p className="text-gray-400">Withdrawn</p>
+                            <p className="font-medium">{user.totalWithdrawal.toLocaleString()}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleFreezeToggle(user)}
+                            className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              user.frozen
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                            }`}
+                          >
+                            {user.frozen ? '🔓 Unfreeze' : '🔒 Freeze'}
+                          </button>
+                          <button
+                            onClick={() => { setAdjustModal({ user }); setAdjustType('add'); }}
+                            className="flex-1 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 transition-colors"
+                          >
+                            💰 Adjust
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(user)}
+                            className="flex-1 py-1.5 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200 transition-colors"
+                          >
+                            🗑️ Delete
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (!isExpanded) loadReferralTree(user.id);
+                              setExpandedUserId(isExpanded ? null : user.id);
+                            }}
+                            className="flex-1 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-medium hover:bg-purple-200 transition-colors"
+                          >
+                            🌳 Referrals
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded referral tree */}
+                      {isExpanded && tree && (
+                        <div className="border-t border-gray-100 p-4 bg-gray-50">
+                          <h4 className="text-xs font-semibold text-gray-600 mb-2">Referral Tree</h4>
+                          {tree.l1.length === 0 ? (
+                            <p className="text-xs text-gray-400">No referrals yet</p>
+                          ) : (
+                            tree.l1.map(l1u => {
+                              const l2List = tree.l2[l1u.id] || [];
+                              const l1Pkgs = products.filter(p => p.userId === l1u.id);
+                              const l1Invested = l1Pkgs.reduce((s, p) => s + p.packagePrice, 0);
+                              return (
+                                <div key={l1u.id} className="mb-3">
+                                  <div className="flex items-center justify-between bg-blue-50 rounded-lg px-2 py-1.5 mb-1">
+                                    <div>
+                                      <span className="text-xs font-semibold text-blue-700">L1: {l1u.name}</span>
+                                      <span className="text-xs text-blue-500 ml-1">({l1u.phone})</span>
+                                    </div>
+                                    <span className="text-xs text-blue-600">UGX {l1Invested.toLocaleString()}</span>
+                                  </div>
+                                  {l2List.map(l2u => {
+                                    const l3List = tree.l3[l2u.id] || [];
+                                    const l2Pkgs = products.filter(p => p.userId === l2u.id);
+                                    const l2Invested = l2Pkgs.reduce((s, p) => s + p.packagePrice, 0);
+                                    return (
+                                      <div key={l2u.id} className="ml-4 mb-1">
+                                        <div className="flex items-center justify-between bg-green-50 rounded px-2 py-1 mb-0.5">
+                                          <div>
+                                            <span className="text-xs text-green-700">L2: {l2u.name}</span>
+                                            <span className="text-xs text-green-500 ml-1">({l2u.phone})</span>
+                                          </div>
+                                          <span className="text-xs text-green-600">UGX {l2Invested.toLocaleString()}</span>
+                                        </div>
+                                        {l3List.map(l3u => {
+                                          const l3Pkgs = products.filter(p => p.userId === l3u.id);
+                                          const l3Invested = l3Pkgs.reduce((s, p) => s + p.packagePrice, 0);
+                                          return (
+                                            <div key={l3u.id} className="ml-4 flex items-center justify-between bg-purple-50 rounded px-2 py-1 mb-0.5">
+                                              <div>
+                                                <span className="text-xs text-purple-700">L3: {l3u.name}</span>
+                                                <span className="text-xs text-purple-500 ml-1">({l3u.phone})</span>
+                                              </div>
+                                              <span className="text-xs text-purple-600">UGX {l3Invested.toLocaleString()}</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })
+                          )}
+                          <div className="mt-2 pt-2 border-t border-gray-200 flex gap-3 text-xs text-gray-500">
+                            <span>L1: {tree.l1.length}</span>
+                            <span>L2: {Object.values(tree.l2).flat().length}</span>
+                            <span>L3: {Object.values(tree.l3).flat().length}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── PACKAGES ──────────────────────────────────────────────── */}
+            {tab === 'packages' && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                    <p className="text-xs text-gray-400">Active</p>
+                    <p className="text-2xl font-bold text-green-600">{products.filter(p => p.status === 'active').length}</p>
+                  </div>
+                  <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                    <p className="text-xs text-gray-400">Total Invested</p>
+                    <p className="text-sm font-bold text-blue-600">
+                      UGX {products.reduce((s, p) => s + p.packagePrice, 0).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+                {products.map(p => {
+                  const owner = users.find(u => u.id === p.userId);
+                  return (
+                    <div key={p.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-semibold text-gray-800 text-sm">{p.packageName}</p>
+                          <p className="text-xs text-gray-400">{owner?.name} ({owner?.phone})</p>
+                          <span className={`inline-block text-xs px-2 py-0.5 rounded-full mt-1 ${
+                            p.status === 'active' ? 'bg-green-100 text-green-700' :
+                            p.status === 'expired' ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {p.status}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400">Invested</p>
+                          <p className="text-sm font-bold text-gray-800">UGX {p.packagePrice.toLocaleString()}</p>
+                          <p className="text-xs text-green-600">+{p.dailyIncome.toLocaleString()}/day</p>
+                        </div>
+                      </div>
+                      {p.expiryDate && (
+                        <p className="text-xs text-gray-400 mt-2">Expires: {new Date(p.expiryDate).toLocaleDateString()}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── RECHARGES ─────────────────────────────────────────────── */}
+            {tab === 'recharges' && (
+              <div className="space-y-3">
+                {['pending', 'approved', 'rejected'].map(status => {
+                  const filtered = recharges.filter(r => r.status === status);
+                  if (filtered.length === 0) return null;
+                  return (
+                    <div key={status}>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">{status} ({filtered.length})</h3>
+                      {filtered.map(r => (
+                        <div key={r.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-2">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="font-semibold text-gray-800 text-sm">{r.userName || 'Unknown'}</p>
+                              <p className="text-xs text-gray-400">{r.userPhone}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">{r.network?.toUpperCase()} • Sender: {r.senderPhone}</p>
+                              {r.senderName && <p className="text-xs text-gray-500">Sender Name: {r.senderName}</p>}
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-blue-600">UGX {r.amount.toLocaleString()}</p>
+                              <p className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                          {r.status === 'pending' && (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleApproveRecharge(r)}
+                                className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium"
+                              >
+                                ✓ Approve
+                              </button>
+                              <button
+                                onClick={() => handleRejectRecharge(r)}
+                                className="flex-1 py-2 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200"
+                              >
+                                ✗ Reject
+                              </button>
+                            </div>
+                          )}
+                          {r.status !== 'pending' && r.processedAt && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              Processed: {new Date(r.processedAt).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+                {recharges.length === 0 && <p className="text-center text-gray-400 py-8">No recharges yet</p>}
+              </div>
+            )}
+
+            {/* ── WITHDRAWALS ───────────────────────────────────────────── */}
+            {tab === 'withdrawals' && (
+              <div className="space-y-3">
+                {['pending', 'approved', 'rejected'].map(status => {
+                  const filtered = withdrawals.filter(w => w.status === status);
+                  if (filtered.length === 0) return null;
+                  return (
+                    <div key={status}>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">{status} ({filtered.length})</h3>
+                      {filtered.map(w => (
+                        <div key={w.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-2">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="font-semibold text-gray-800 text-sm">{w.userName || 'Unknown'}</p>
+                              <p className="text-xs text-gray-400">{w.userPhone}</p>
+                              <div className="mt-1 bg-blue-50 rounded-lg px-2 py-1.5">
+                                <p className="text-xs font-semibold text-blue-700">{w.walletType?.toUpperCase()} Mobile Money</p>
+                                <p className="text-xs text-blue-600">📱 {w.walletPhone}</p>
+                                <p className="text-xs text-blue-600">👤 {w.walletName}</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-400">Amount</p>
+                              <p className="text-sm font-bold text-gray-800">UGX {w.amount.toLocaleString()}</p>
+                              <p className="text-xs text-green-600">Net: UGX {w.netAmount.toLocaleString()}</p>
+                              <p className="text-xs text-gray-400">{new Date(w.createdAt).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                          {w.status === 'pending' && (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleApproveWithdrawal(w)}
+                                className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium"
+                              >
+                                ✓ Approve
+                              </button>
+                              <button
+                                onClick={() => handleRejectWithdrawal(w)}
+                                className="flex-1 py-2 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200"
+                              >
+                                ✗ Reject (Refund)
+                              </button>
+                            </div>
+                          )}
+                          {w.status !== 'pending' && w.processedAt && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              Processed: {new Date(w.processedAt).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+                {withdrawals.length === 0 && <p className="text-center text-gray-400 py-8">No withdrawals yet</p>}
+              </div>
+            )}
+
+            {/* ── ANALYTICS ─────────────────────────────────────────────── */}
+            {tab === 'analytics' && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-800 mb-4 text-sm">Recharge Revenue (Last 7 Days)</h3>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={rechargeChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip formatter={(v: number) => [`UGX ${v.toLocaleString()}`, 'Revenue']} />
+                      <Bar dataKey="amount" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-800 mb-4 text-sm">New Users (Last 7 Days)</h3>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={userGrowthData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="users" stroke="#16a34a" strokeWidth={2} dot={{ r: 4 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Total Revenue', value: `UGX ${totalRevenue.toLocaleString()}`, color: 'text-purple-600' },
+                    { label: 'Total Withdrawn', value: `UGX ${totalWithdrawn.toLocaleString()}`, color: 'text-orange-600' },
+                    { label: 'Active Packages', value: activePackages, color: 'text-green-600' },
+                    { label: 'Total Users', value: users.length, color: 'text-blue-600' },
+                  ].map(stat => (
+                    <div key={stat.label} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                      <p className="text-xs text-gray-400">{stat.label}</p>
+                      <p className={`text-base font-bold mt-1 ${stat.color}`}>{stat.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── REDEEM CODES ──────────────────────────────────────────── */}
+            {tab === 'redeems' && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-800 mb-3 text-sm">Create New Code</h3>
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={newCode}
+                      onChange={e => setNewCode(e.target.value.toUpperCase())}
+                      placeholder="Code (e.g. GIFT2024)"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase"
+                    />
+                    <input
+                      type="number"
+                      value={newCodeAmount}
+                      onChange={e => setNewCodeAmount(e.target.value)}
+                      placeholder="Amount (UGX)"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <input
+                      type="date"
+                      value={newCodeExpiry}
+                      onChange={e => setNewCodeExpiry(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <button
+                      onClick={handleCreateRedeemCode}
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold"
+                    >
+                      Create Code
+                    </button>
+                  </div>
+                </div>
+
+                {redeemCodes.map(code => (
+                  <div key={code.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-bold text-gray-800">{code.code}</p>
+                        <p className="text-sm text-green-600">UGX {code.amount.toLocaleString()}</p>
+                        <p className="text-xs text-gray-400">
+                          Expires: {new Date(code.expiresAt).toLocaleDateString()} • Used: {code.usedBy.length}x
+                        </p>
+                        <span className={`inline-block text-xs px-2 py-0.5 rounded-full mt-1 ${
+                          code.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {code.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {code.isActive && (
+                          <button
+                            onClick={() => handleDeactivateCode(code)}
+                            className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-medium hover:bg-orange-200"
+                          >
+                            Deactivate
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteCode(code.id)}
+                          className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {redeemCodes.length === 0 && <p className="text-center text-gray-400 py-8">No redeem codes yet</p>}
+              </div>
+            )}
+          </>
         )}
-        {tab==='products' && <div className="space-y-3">{products.map(p=>{const o=users.find(u=>u.id===p.userId); return <div key={p.id} className="bg-white rounded-xl p-4 shadow flex justify-between"><div><div className="font-semibold">{p.packageName}</div><div className="text-sm text-gray-500">{o?.name} {o?.phone}</div><div className="text-sm">{fmt(p.packagePrice)} · {fmt(p.dailyIncome)}</div><span className={`text-xs px-2 rounded-full ${p.status==='active'?'bg-green-100 text-green-700':p.status==='pending'?'bg-yellow-100':'bg-gray-100'}`}>{p.status}</span></div>{p.status==='pending'&&<div className="flex flex-col gap-1"><button onClick={()=>handleProductApprove(p)} className="text-xs bg-green-50 text-green-700 px-3 py-1 rounded">Approve</button><button onClick={()=>handleProductReject(p)} className="text-xs bg-red-50 text-red-700 px-3 py-1 rounded">Reject</button></div>}</div>})}</div>}
-        {tab==='recharges' && <div className="space-y-3">{recharges.map(r=><div key={r.id} className={`bg-white rounded-xl p-4 shadow ${r.status==='pending'?'border-l-4 border-yellow-400':''}`}><div className="flex justify-between"><div><div className="font-semibold">{fmt(r.amount)}</div><div className="text-sm">{r.userName} {r.userPhone} · {r.network}</div><span className="text-xs px-2 rounded-full bg-yellow-100">{r.status}</span></div>{r.status==='pending'&&<div className="flex flex-col gap-1"><button onClick={()=>handleRechargeApprove(r)} className="text-xs bg-green-50 text-green-700 px-3 py-1 rounded">Approve</button><button onClick={()=>handleRechargeReject(r)} className="text-xs bg-red-50 px-3 py-1 rounded">Reject</button></div>}</div></div>)}</div>}
-        {tab==='withdrawals' && <div className="space-y-3">{withdrawals.map(w=><div key={w.id} className="bg-white rounded-xl p-4 shadow"><div className="flex justify-between"><div><div className="font-semibold">{fmt(w.amount)} (net {fmt(w.netAmount)})</div><div className="text-sm">{w.walletType} {w.walletPhone}</div><span className="text-xs px-2 rounded-full bg-yellow-100">{w.status}</span></div>{w.status==='pending'&&<div className="flex flex-col gap-1"><button onClick={()=>handleWithdrawalApprove(w)} className="text-xs bg-green-50 px-3 py-1 rounded">Approve</button><button onClick={()=>handleWithdrawalReject(w)} className="text-xs bg-red-50 px-3 py-1 rounded">Reject</button></div>}</div></div>)}</div>}
-        {tab==='redeem' && <div className="space-y-4"><div className="bg-white rounded-xl p-4 shadow"><div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><input value={newRedeemCode} onChange={e=>setNewRedeemCode(e.target.value)} placeholder="CODE" className="border rounded-lg px-3 py-2"/><input type="number" value={newRedeemAmount} onChange={e=>setNewRedeemAmount(e.target.value)} placeholder="Amount" className="border rounded-lg px-3 py-2"/><input type="datetime-local" value={newRedeemExpiry} onChange={e=>setNewRedeemExpiry(e.target.value)} className="border rounded-lg px-3 py-2"/></div><button onClick={handleCreateRedeemCode} className="mt-3 bg-blue-600 text-white px-5 py-2 rounded-lg">Create</button></div>{redeemCodes.map(c=><div key={c.id} className="bg-white rounded-xl p-4 shadow flex justify-between"><div><div className="font-mono font-bold">{c.code}</div><div className="text-sm">{fmt(c.amount)} Used {c.usedBy.length}</div></div><button onClick={()=>handleDeleteRedeemCode(c.id)} className="text-xs bg-red-50 text-red-700 px-3 py-1 rounded">Delete</button></div>)}</div>}
       </div>
-      {adjustModalUser && <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl p-6 w-full max-w-sm"><h3 className="font-bold">Adjust {adjustModalUser.name}</h3><div className="flex gap-2 my-3"><button onClick={()=>setAdjustType('add')} className={`flex-1 py-2 rounded-lg ${adjustType==='add'?'bg-green-600 text-white':'bg-gray-100'}`}>Add</button><button onClick={()=>setAdjustType('deduct')} className={`flex-1 py-2 rounded-lg ${adjustType==='deduct'?'bg-red-600 text-white':'bg-gray-100'}`}>Deduct</button></div><input type="number" value={adjustAmount} onChange={e=>setAdjustAmount(e.target.value)} placeholder="Amount" className="w-full border rounded-lg px-3 py-2 mb-2"/><input value={adjustReason} onChange={e=>setAdjustReason(e.target.value)} placeholder="Reason" className="w-full border rounded-lg px-3 py-2 mb-4"/><div className="flex gap-2"><button onClick={()=>setAdjustModalUser(null)} className="flex-1 border rounded-lg py-2">Cancel</button><button onClick={handleAdjustBalance} className="flex-1 bg-blue-600 text-white rounded-lg py-2">Confirm</button></div></div></div>}
+
+      {/* Adjust Balance Modal */}
+      {adjustModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center px-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <h3 className="font-bold text-gray-800 mb-1">Adjust Balance</h3>
+            <p className="text-sm text-gray-500 mb-4">{adjustModal.user.name} — Current: UGX {adjustModal.user.balance.toLocaleString()}</p>
+
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setAdjustType('add')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium ${adjustType === 'add' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                + Add
+              </button>
+              <button
+                onClick={() => setAdjustType('deduct')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium ${adjustType === 'deduct' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                − Deduct
+              </button>
+            </div>
+
+            <input
+              type="number"
+              value={adjustAmount}
+              onChange={e => setAdjustAmount(e.target.value)}
+              placeholder="Amount (UGX)"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+            />
+            <input
+              type="text"
+              value={adjustNote}
+              onChange={e => setAdjustNote(e.target.value)}
+              placeholder="Reason (optional)"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setAdjustModal(null)}
+                className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAdjustBalance}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

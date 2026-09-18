@@ -10,12 +10,12 @@ import {
   getUserById,
 } from '@/lib/storage';
 import { PACKAGES, PackageGroup } from '@/constants/packages';
-import type { SamsungUser, SamsungRecharge } from '@/types';
+import type { User, Recharge } from '@/types';
 
 const Product = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<SamsungUser | null>(null);
-  const [pendingRecharge, setPendingRecharge] = useState<SamsungRecharge | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [pendingRecharge, setPendingRecharge] = useState<Recharge | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [confirmPkg, setConfirmPkg] = useState<typeof PACKAGES[0] | null>(null);
 

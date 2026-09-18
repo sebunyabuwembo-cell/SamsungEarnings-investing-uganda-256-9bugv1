@@ -1,12 +1,18 @@
 // ─── Package Definition ────────────────────────────────────────────────────────
 
+export enum PackageGroup {
+  Starter = 'Starter',
+  Growth = 'Growth',
+  Premium = 'Premium',
+}
+
 export interface Package {
   id: string;
   name: string;
   price: number;
   dailyIncome: number;
   duration: number; // days
-  group: 1 | 2 | 3;
+  group: PackageGroup | 1 | 2 | 3;
   image: string;
 }
 
@@ -18,7 +24,7 @@ export const PACKAGES: Package[] = [
     price: 15000,
     dailyIncome: 600,
     duration: 60,
-    group: 1,
+    group: PackageGroup.Starter,
     image: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?w=600&q=80&auto=format',
   },
   {
@@ -27,7 +33,7 @@ export const PACKAGES: Package[] = [
     price: 30000,
     dailyIncome: 1200,
     duration: 60,
-    group: 1,
+    group: PackageGroup.Starter,
     image: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600&q=80&auto=format',
   },
   {
@@ -36,7 +42,7 @@ export const PACKAGES: Package[] = [
     price: 60000,
     dailyIncome: 2500,
     duration: 60,
-    group: 1,
+    group: PackageGroup.Starter,
     image: 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=600&q=80&auto=format',
   },
   {
@@ -45,7 +51,7 @@ export const PACKAGES: Package[] = [
     price: 100000,
     dailyIncome: 4200,
     duration: 60,
-    group: 1,
+    group: PackageGroup.Starter,
     image: 'https://images.unsplash.com/photo-1603145733146-ae562a55031e?w=600&q=80&auto=format',
   },
 
@@ -56,7 +62,7 @@ export const PACKAGES: Package[] = [
     price: 200000,
     dailyIncome: 9000,
     duration: 90,
-    group: 2,
+    group: PackageGroup.Growth,
     image: 'https://images.unsplash.com/photo-1567581935884-3349723552ca?w=600&q=80&auto=format',
   },
   {
@@ -65,7 +71,7 @@ export const PACKAGES: Package[] = [
     price: 500000,
     dailyIncome: 23000,
     duration: 90,
-    group: 2,
+    group: PackageGroup.Growth,
     image: 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=600&q=80&auto=format',
   },
   {
@@ -74,7 +80,7 @@ export const PACKAGES: Package[] = [
     price: 800000,
     dailyIncome: 38000,
     duration: 90,
-    group: 2,
+    group: PackageGroup.Growth,
     image: 'https://images.unsplash.com/photo-1610945264803-c22b62831983?w=600&q=80&auto=format',
   },
   {
@@ -83,7 +89,7 @@ export const PACKAGES: Package[] = [
     price: 1000000,
     dailyIncome: 50000,
     duration: 90,
-    group: 2,
+    group: PackageGroup.Growth,
     image: 'https://images.unsplash.com/photo-1585060544812-6b45742d762f?w=600&q=80&auto=format',
   },
 
@@ -94,7 +100,7 @@ export const PACKAGES: Package[] = [
     price: 1300000,
     dailyIncome: 500000,
     duration: 30,
-    group: 3,
+    group: PackageGroup.Premium,
     image: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=600&q=80&auto=format',
   },
   {
@@ -103,7 +109,7 @@ export const PACKAGES: Package[] = [
     price: 2000000,
     dailyIncome: 700000,
     duration: 30,
-    group: 3,
+    group: PackageGroup.Premium,
     image: 'https://images.unsplash.com/photo-1592286927505-1def25115558?w=600&q=80&auto=format',
   },
   {
@@ -112,7 +118,7 @@ export const PACKAGES: Package[] = [
     price: 3000000,
     dailyIncome: 1100000,
     duration: 30,
-    group: 3,
+    group: PackageGroup.Premium,
     image: 'https://images.unsplash.com/photo-1601784551446-20c9e07cdbdb?w=600&q=80&auto=format',
   },
 ];
